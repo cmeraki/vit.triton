@@ -1,5 +1,7 @@
 # From: https://github.com/cuda-mode/lectures/blob/main/lecture%2014/A_Practitioners_Guide_to_Triton.ipynb
 
+import triton
+
 def test_pid_conds(conds, pid_0=[0], pid_1=[0], pid_2=[0]):
     '''Test if condition on pids are fulfilled
     E.g.:

@@ -21,7 +21,7 @@ def patching_kernel(
 
     row_offset = row_idx*block_y + tl.arange(0, block_y)
     col_offset = col_idx*block_x + tl.arange(0, block_x)
-    data_offset = row_offset[:, None]*W + col_offset[None,:]
+    data_offset = row_offset[None, :]*W + col_offset[:, None]
 
     row_mask = row_offset < H
     col_mask = col_offset < W
@@ -66,8 +66,8 @@ def patching_torch(matrix, patch_size):
 
 
 if __name__ == '__main__':
-    height = 8
-    width = 8
+    height = 16
+    width = 16
     patch_size = 4
     print(f'Height: {height}, width: {width}, P: {patch_size}')
 
@@ -78,3 +78,5 @@ if __name__ == '__main__':
     print(f'Original matrix:\n{A}')
     print(f'PyTorch patching:\n{patches_pytorch}')
     print(f'Triton patching:\n{patches_triton}')
+
+    assert torch.allclose(patches_pytorch, patches_triton), 'Data does not match'
