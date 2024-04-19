@@ -47,7 +47,7 @@ def patching_triton(matrix, patch_size):
 
     # Every block will handle a 2D patch
     block_x, block_y = triton.next_power_of_2(patch_size), triton.next_power_of_2(patch_size)
-    grid = lambda meta: (triton.cdiv(H, block_x), triton.cdiv(W, block_y))
+    grid = lambda meta: (triton.cdiv(H, block_y), triton.cdiv(W, block_x))
 
     print(f'N:{N}, Block size: {(block_x, block_y)}, grid: {grid}')
 
