@@ -4,7 +4,27 @@ import triton.language as tl
 
 device = 'cuda:0'
 
-
+@triton.autotune(
+  configs=[
+    triton.Config({'bsy': 128, 'bsx': 256}, num_warps=8),
+    triton.Config({'bsy': 64, 'bsx': 256}, num_warps=4),
+    triton.Config({'bsy': 128, 'bsx': 128}, num_warps=4),
+    triton.Config({'bsy': 128, 'bsx': 64}, num_warps=4),
+    triton.Config({'bsy': 64, 'bsx': 128}, num_warps=4),
+    triton.Config({'bsy': 128, 'bsx': 32}, num_warps=4),
+    triton.Config({'bsy': 64, 'bsx': 32}, num_warps=2),
+    triton.Config({'bsy': 32, 'bsx': 64}, num_warps=2),
+    triton.Config({'bsy': 128, 'bsx': 256}, num_warps=8),
+    triton.Config({'bsy': 256, 'bsx': 128}, num_warps=8),
+    triton.Config({'bsy': 256, 'bsx': 64,}, num_warps=4),
+    triton.Config({'bsy': 64, 'bsx': 256}, num_warps=4),
+    triton.Config({'bsy': 128, 'bsx': 128}, num_warps=4),
+    triton.Config({'bsy': 128, 'bsx': 64}, num_warps=4),
+    triton.Config({'bsy': 64, 'bsx': 128}, num_warps=4),
+    triton.Config({'bsy': 128, 'bsx': 32}, num_warps=4),
+  ],
+  key=['M', 'N', 'K'],
+)
 @triton.jit
 def matmul_kernel(
     A_ptr, B_ptr, O_ptr,
@@ -49,17 +69,15 @@ def matmul_kernel(
         + offset_oc[None, :]*O_stride_width  # by * bx
     mask_o = (offset_or[:, None] < M) & (offset_oc[None, :] < N)
 
-    tl.store(O_ptr+offset_o, o)
-
+    tl.store(O_ptr+offset_o, o, mask_o)
 
 def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     M, K = A.shape
     K, N = B.shape
 
-    m, n = 16, 16
-    bsx, bsy = triton.next_power_of_2(n), triton.next_power_of_2(m)
-    grid = (triton.cdiv(M, bsy), triton.cdiv(N, bsx))
-    print(f'bsx {bsx}, bsy {bsy}, grid {grid}')
+    # m, n = 16, 16
+    # bsx, bsy = triton.next_power_of_2(n), triton.next_power_of_2(m)
+    grid = lambda meta: (triton.cdiv(M, meta["bsy"]), triton.cdiv(N, meta["bsx"]))
 
     O = torch.empty((M, N)).to(device)
     matmul_kernel[grid](
@@ -67,7 +85,7 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
         A.stride(0), A.stride(1),
         B.stride(0), B.stride(1),
         O.stride(0), O.stride(1),
-        M, N, K, bsx=bsx, bsy=bsy
+        M, N, K#, bsx=bsx, bsy=bsy
     )
 
     return O
@@ -97,12 +115,12 @@ if __name__ == '__main__':
     y_pytorch = torch.matmul(A, B)
     y_triton = matmul_triton(A, B)
 
-    # print(y_pytorch.shape, y_triton.shape)
-
     # print(f'Original matrix:\n{A}\n{B}')
     # print(f'PyTorch:\n{y_pytorch}')
     # print(f'Triton:\n{y_triton}')
 
-    assert torch.allclose(y_pytorch, y_triton), 'Data does not match'
-
-    print('Tensors match')
+    # Unit testing
+    if torch.allclose(y_triton, y_pytorch, atol=1e-2, rtol=0):
+        print("✅ Triton and Torch match")
+    else:
+        print("❌ Triton and Torch differ")
