@@ -14,6 +14,13 @@ def matmul_kernel(
     M, N, K: tl.constexpr,
     bsx: tl.constexpr, bsy: tl.constexpr
 ):
+    """
+    Matrix multiplication by loading rows of A
+    and columns of B to calculate a block of O.
+
+    This can be further improved by implementing tiling, however
+    I am yet to figure out how to use L2 cache in Triton.
+    """
     # Load apt data into memory
     row_idx = tl.program_id(axis=0)
     col_idx = tl.program_id(axis=1)
@@ -67,15 +74,25 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
 
 
 if __name__ == '__main__':
-    M = 512
-    K = 512
-    N = 512
+    '''
+    python matmul.py -M 512 -N 512 -K 512
+    '''
+    from argparse import ArgumentParser
+    parser = ArgumentParser()
+    parser.add_argument('-M', type=int)
+    parser.add_argument('-K', type=int)
+    parser.add_argument('-N', type=int)
 
-    A = torch.randn((M, K), device='cuda', dtype=torch.float32)
-    B = torch.randn((K, N), device='cuda', dtype=torch.float32)
+    args = parser.parse_args()
+    print(f'Args: {args}')
+    M = args.M
+    K = args.K
+    N = args.N
+
+    A = torch.randint(0, 10, (M, K), device='cuda', dtype=torch.float32)
+    B = torch.randint(0, 5, (K, N), device='cuda', dtype=torch.float32)
 
     assert A.shape[1] == B.shape[0], 'Matrix are not compatible for multiplication'
-
 
     y_pytorch = torch.matmul(A, B)
     y_triton = matmul_triton(A, B)
@@ -86,6 +103,6 @@ if __name__ == '__main__':
     # print(f'PyTorch:\n{y_pytorch}')
     # print(f'Triton:\n{y_triton}')
 
-    assert torch.allclose(y_pytorch, y_triton, atol=1e-2, rtol=0), 'Data does not match'
+    assert torch.allclose(y_pytorch, y_triton), 'Data does not match'
 
     print('Tensors match')
