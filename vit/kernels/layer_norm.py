@@ -58,7 +58,7 @@ def layernorm_kernel(
     #data = tl.load(a_ptr + row + tl.arange(0, BLOCK_SIZE), tl.arange(0, BLOCK_SIZE) < N)
     #print('rowidx, row, data, mean, std\t', row_idx, row, data, mean, std)
 
-def layernorm(A: torch.Tensor, weight, bias, eps):
+def layernorm_triton(A: torch.Tensor, weight, bias, eps):
     assert A.is_contiguous(), 'Matrix is not contiguous'
     assert A.is_cuda, 'Matrix is not on GPU'
 
@@ -95,7 +95,7 @@ if __name__ == '__main__':
     eps = 1e-5
 
     y_pytorch = torch.nn.functional.layer_norm(a, _shape, weight, bias, eps).to(dtype)
-    y_triton = layernorm(a, weight=weight, bias=bias, eps=eps)
+    y_triton = layernorm_triton(a, weight=weight, bias=bias, eps=eps)
 
     print(f'Original tensor\n{a}')
     print(f'PyTorch layer norm\n{y_pytorch}')
