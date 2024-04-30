@@ -1,9 +1,138 @@
 import torch
 from torch import nn
 
-from kernels import patching, matmul
+from .utils import tensor_info
+from kernels import (
+    patching,
+    matmul,
+    softmax,
+    layernorm,
+    add
+)
 
 device = 'cuda:0'
+dtype = torch.float32
+
+# TODO: Add activation support
+
+class SelfAttention(nn.Module):
+    def __init__(
+        self,
+        d_in: int,
+        d_out: int,
+        dropout: int = 0, #TODO: Add dropout support
+    ):
+        super().__init__()
+        self.d_in = d_in
+        self.d_out = d_out
+
+        # Initializing Q, K, V with shapes (d_in, d_out)
+        self.q_proj = nn.Parameter(torch.randn(self.d_in, self.d_out)).to(device, dtype)
+        self.k_proj = nn.Parameter(torch.randn(self.d_in, self.d_out)).to(device, dtype)
+        self.v_proj = nn.Parameter(torch.randn(self.d_in, self.d_out)).to(device, dtype)
+
+    @tensor_info
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        # All three are B x N x d_out
+        # TODO: Possible to merge all these 3 matmuls in single kernel?
+        q = matmul(x, self.q_proj)
+        k = matmul(x, self.k_proj)
+        v = matmul(x, self.v_proj)
+
+        # Inputs are B x N x d_out, B x N x d_out
+        # Output is B x N x N
+        # TODO: Need to implement 3 dim by 3 dim matrix mult kernel
+        attn_scores = matmul(q, k.T) 
+        # TODO: Fuse matmul and sqrt
+        attn_scores = attn_scores/torch.sqrt(self.d_out)
+        attn_scores = softmax(attn_scores)
+
+        # Inputs are B x N x N, B x N x d_out
+        # Output is B x N x d_out
+        context_vec = matmul(attn_scores, v)
+
+        return context_vec
+
+class MultiHeadAttention(nn.Module):
+    def __init__(
+        self,
+        num_heads: int,
+        d_in: int,
+        d_out: int,
+    ):
+        super().__init__()
+
+        assert d_in%num_heads == 0, f'Input dimension should be equally divided amongst all heads. d_in%num_heads needs to be 0. Current: {d_in%num_heads}'
+        assert d_in/num_heads == d_out, f'`d_out` is not equal to `d_in/num_heads`. Current: {d_in/num_heads}, {d_out}'
+
+        self.num_heads = num_heads
+        self.d_in = d_in
+        self.d_out = d_out
+        self.o_proj = nn.Parameter(torch.randn(self.d_in, self.d_in)).to(device, dtype)
+
+        self.layers = []
+        for _ in range(self.num_heads):
+            self.layers.append(SelfAttention(d_in=d_in, d_out=d_out))
+
+
+    @tensor_info
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        outputs = []
+        for i in range(self.num_heads):
+            # Naive: Process one head at a time
+            # Each elem in output will be B x N x d_out
+            # TODO: Implement MHA in a more optimized kernel
+            outputs.append(
+                self.layers[i](x)
+            )
+
+        # B x N x d_in
+        out = torch.cat(
+            outputs,
+            dim=-1
+        ).contiguous()
+
+        out = matmul(out, self.o_proj)
+
+        return out
+
+
+class Transformer(nn.Module):
+    def __init__(
+        self,
+        num_heads: int,
+        d_in: int,
+        d_out: int
+    ):
+        super().__init__()
+        self.num_heads = num_heads
+        self.d_in = d_in
+        self.d_out = d_out
+
+        self.mha = MultiHeadAttention(self.num_heads, self.d_in, self.d_out)
+        self.ffn_1 = nn.Parameter(self.d_in, 4*self.d_in).to(device, dtype)
+        self.ffn_2 = nn.Parameter(4*self.d_in, self.d_in).to(device, dtype)
+    
+    def forward(self, x):
+        # B x N x D_out
+        attn = self.mha(x)
+
+        # Skip connection
+        # TODO: possible to fuse the two kernels?
+        intermediate = add(attn, x)
+        intermediate = layernorm(intermediate)
+
+        # B x N x 4D_out
+        out = matmul(intermediate, self.ffn_1)
+        # B x N x D_out
+        out = matmul(out, self.ffn_2)
+
+        # Skip connection
+        out = add(out, intermediate)
+
+        return out
+
 
 class VIT(nn.Module):
     def __init__(
@@ -12,7 +141,9 @@ class VIT(nn.Module):
         width: int,
         channels: int,
         patch_size: int,
-        hidden_dim: int
+        hidden_dim: int,
+        num_heads: int,
+        num_layers: int
     ):
         super().__init__()
 
@@ -25,26 +156,30 @@ class VIT(nn.Module):
         self.channels = channels
         self.patch_size = patch_size
         self.hidden_dim = hidden_dim
-        
+        self.num_heads = num_heads
+        self.num_layers = num_layers
+
         num_patches = (self.height//self.patch_size) * (self.width//self.patch_size)
         patch_dim = self.patch_size*self.patch_size*self.channels
 
         # Layers initialization
-        self.projection = nn.Parameter(torch.randn(patch_dim, self.hidden_dim)).to(device, torch.float32)
-        self.positional_embedding = nn.Parameter(torch.randn(1, num_patches, self.hidden_dim)).to(device, torch.float32)
-    
+        self.projection = nn.Parameter(torch.randn(patch_dim, self.hidden_dim)).to(device, dtype)
+        self.positional_embedding = nn.Parameter(torch.randn(1, num_patches, self.hidden_dim)).to(device, dtype)
+        self.transformer_blocks = [Transformer(num_heads=self.num_heads, d_in=self.hidden_dim, d_out=self.num_heads/self.hidden_dim) for _ in range(self.num_layers)]
+
     def forward(self, x):
         print(f'Image shape provided: {x.shape}')
         assert x.shape[1:] == (3, self.height, self.width), f"Image size {x.shape[1:]} not matching with the model input size: {3, self.height, self.width}"
 
-        x = patching(x, self.patch_size) 
-        print(f'Shape after patching: {x.shape}')
-        
+
+        # Input processing
+        x = patching(x, self.patch_size)
+        # TODO: Possible to fuse kernels?
         x = matmul(x, self.projection)
-        print(f'Shape after matmul: {x.shape}')
-        
-        x += self.positional_embedding
-        print(f'Shape after positional embedding: {x.shape}')
+        x = add(x, self.positional_embedding)
+
+        for i in range(self.num_layers):
+            x = self.transformer_blocks[i](x)
 
         return x
 
@@ -53,18 +188,22 @@ if __name__ == '__main__':
     import requests
     import numpy as np
 
+    height, width = 224, 224
+
     model = VIT(
-                height=128,
-                width=128,
-                channels=3,
-                patch_size=4,
-                hidden_dim=256
-            )
+        height=height,
+        width=width,
+        channels=3,
+        patch_size=16,
+        hidden_dim=256,
+        num_heads=12,
+        num_layers=12
+    )
 
     url = 'http://images.cocodataset.org/val2017/000000039769.jpg'
     image = Image.open(requests.get(url, stream=True).raw)
-    image = image.resize((128, 128))
-    image = torch.Tensor(np.array(image)).to(device='cuda', dtype=torch.float32)
+    image = image.resize((height, width))
+    image = torch.Tensor(np.array(image)).to(device=device, dtype=dtype)
 
     print(f'Input image shape: {image.shape}')
 
