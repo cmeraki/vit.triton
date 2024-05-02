@@ -19,11 +19,12 @@ def layernorm_kernel(
 ):
     row_idx = tl.program_id(axis=0)
     row = row_idx * a_stride_m
-    mask = tl.arange(0, BLOCK_SIZE) < N 
+    #mask = tl.arange(0, BLOCK_SIZE) < N 
 
     local_sum = 0.0
     for offset in range(0, N, BLOCK_SIZE):
         local_offset = row + offset + tl.arange(0, BLOCK_SIZE)    
+        mask = offset + tl.arange(0, BLOCK_SIZE) < N
         data = tl.load(a_ptr + local_offset, mask=mask, other=0.0)
 
         local_sum += tl.sum(data)
@@ -33,6 +34,7 @@ def layernorm_kernel(
     local_std = 0.0
     for offset in range(0, N, BLOCK_SIZE):
         local_offset = row + offset + tl.arange(0, BLOCK_SIZE)
+        mask = offset + tl.arange(0, BLOCK_SIZE) < N
         data = tl.load(a_ptr + local_offset, mask=mask, other=mean)
 
         x = data-mean
@@ -45,10 +47,12 @@ def layernorm_kernel(
 
     for offset in range(0, N, BLOCK_SIZE):
         local_offset = offset + tl.arange(0, BLOCK_SIZE)
+        mask = local_offset < N
         w = tl.load(weight_ptr + local_offset, mask=mask, other=0.0)
         b = tl.load(bias_ptr + local_offset, mask=mask, other=0.0)
 
         local_offset += row
+        mask = offset + tl.arange(0, BLOCK_SIZE) < N
         x = tl.load(a_ptr + local_offset, mask=mask, other=0.0)
 
         norm = w*((x-mean)/std) + b
@@ -64,7 +68,8 @@ def layernorm_triton(A: torch.Tensor, weight, bias, eps):
 
     # Output tensor
     O = torch.empty_like(A, device='cuda', dtype=torch.float32)
-    BLOCK_SIZE_X = triton.next_power_of_2(A.shape[1]) # every block will process a complete row
+    #BLOCK_SIZE_X = triton.next_power_of_2(A.shape[1]) # every block will process a complete row
+    BLOCK_SIZE_X = 16
     grid = (M, )
 
     print(f'Grid: {grid}, block: {BLOCK_SIZE_X}')

@@ -82,6 +82,12 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     Args:
         - A {torch.Tensor}: Input matrix with shape (B, T, Cin) where B is the batch size, T is the sequence length, Cin is the input dimension
         - B {torch.Tensor}: Weight matrix with shape (Cin, Cout) where Cout is the hidden dimension
+
+    Returns:
+        - {torch.Tensor}: Output tensor with (B, T, Cout)
+
+    #TODO: Handle (B, T, Cin) and (B, T, Cin) matrix mult, just need to add batch offset to output
+    Output will be (B, T, T)
     """
     assert len(A.shape) == 3, "First input matrix needs to have 3 dimensions (B, T, C)"
     assert A.device == B.device and A.is_cuda, "Both matrix should be on GPU"
