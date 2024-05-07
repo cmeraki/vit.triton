@@ -146,7 +146,43 @@ if __name__ == '__main__':
     print(f'Triton:\n{y_triton}')
 
     # Unit testing
-    if torch.allclose(y_triton, y_pytorch, atol=1e-2, rtol=0):
-        print("✅ Triton and Torch match")
-    else:
-        print("❌ Triton and Torch differ")
+    assert torch.allclose(y_triton, y_pytorch), "Data does not match"
+
+    @triton.testing.perf_report(
+        triton.testing.Benchmark(
+            x_names=["M", "N"],
+            x_vals=[64, 128, 256, 512, 1024, 2056, 4096],
+            line_arg='provider',
+            line_vals=[
+                'triton',
+                'torch',
+            ],
+            line_names=[
+                "Triton",
+                "Torch (native)",
+            ],
+            styles=[('blue', '-'), ('green', '-')],
+            ylabel="GB/s",
+            plot_name="Performance",
+            # values for function arguments not in `x_names` and `y_name`
+            args={'batch_size': 1, 'K': 32},
+        ))
+    def benchmark(batch_size, M, N, K, provider):
+        quantiles = [0.5, 0.2, 0.8]
+
+        A = torch.randint(0, 10, (batch_size, M, K), device='cuda', dtype=torch.float32)
+        B = torch.randint(0, 5, (K, N), device='cuda', dtype=torch.float32)
+
+        if provider == 'triton':
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul_triton(A, B), quantiles=quantiles)
+        if provider == 'torch':
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(A, B), quantiles=quantiles)
+
+        def gbps(ms): return 2 * M * N * K * 1e-12 / (ms * 1e-3)
+
+        return gbps(ms), gbps(max_ms), gbps(min_ms)
+
+    benchmark.run(
+        show_plots=True,
+        print_data=True
+    )
