@@ -3,7 +3,7 @@ import triton
 import triton.language as tl
 
 device = 'cuda'
-dtype = torch.float32
+dtype = torch.float16
 
 @triton.autotune(
     configs=[
@@ -38,6 +38,10 @@ def layernorm_kernel(
     out_ptr,
     BLOCK_SIZE: tl.constexpr
 ):
+    """
+    IDEA 1: Merge batch and seq len dimension into 1
+    IDEA 2: Use tiled row approach
+    """
     batch_idx = tl.program_id(axis=0)
     row_idx = tl.program_id(axis=1)
 
@@ -170,7 +174,7 @@ if __name__ == '__main__':
             ylabel="GB/s",
             plot_name="Performance",
             # values for function arguments not in `x_names` and `y_name`
-            args={'B': 12, 'D': 768},
+            args={'B': 1, 'D': 768},
         ))
     def benchmark(B, N, D, provider):
         quantiles = [0.5, 0.2, 0.8]
