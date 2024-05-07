@@ -170,7 +170,7 @@ if __name__ == '__main__':
             ylabel="GB/s",
             plot_name="Performance",
             # values for function arguments not in `x_names` and `y_name`
-            args={'B': 1, 'D': 768},
+            args={'B': 12, 'D': 768},
         ))
     def benchmark(B, N, D, provider):
         quantiles = [0.5, 0.2, 0.8]
