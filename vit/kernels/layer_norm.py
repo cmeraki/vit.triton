@@ -59,8 +59,6 @@ def layernorm_kernel(
 
         tl.store(out_ptr+local_offset, norm, mask=mask)
 
-    #data = tl.load(a_ptr + row + tl.arange(0, BLOCK_SIZE), tl.arange(0, BLOCK_SIZE) < N)
-    #print('rowidx, row, data, mean, std\t', row_idx, row, data, mean, std)
 
 def layernorm_triton(A: torch.Tensor, weight, bias, eps):
     assert A.is_contiguous(), 'Matrix is not contiguous'

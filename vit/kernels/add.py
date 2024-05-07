@@ -4,6 +4,20 @@ import triton.language as tl
 
 device = 'cuda:0'
 
+
+@triton.autotune(
+    configs=[
+        triton.Config({'bs_row': 128, 'bs_col': 128}, num_warps=8),
+        triton.Config({'bs_row': 64, 'bs_col': 64}, num_warps=8),
+        triton.Config({'bs_row': 32, 'bs_col': 32}, num_warps=8),
+        triton.Config({'bs_row': 16, 'bs_col': 16}, num_warps=8),
+        triton.Config({'bs_row': 128, 'bs_col': 128}, num_warps=4),
+        triton.Config({'bs_row': 64, 'bs_col': 64}, num_warps=4),
+        triton.Config({'bs_row': 32, 'bs_col': 32}, num_warps=4),
+        triton.Config({'bs_row': 16, 'bs_col': 16}, num_warps=4),
+    ],
+    key=['num_rows', 'num_cols']
+)
 @triton.jit
 def add_and_norm_kernel(
     # Tensor params
@@ -16,10 +30,6 @@ def add_and_norm_kernel(
     num_rows,
     num_cols,
     out_ptr,
-    # Layernorm params
-    weight_ptr,
-    bias_ptr,
-    eps,
     # Kernel params
     bs_row: tl.constexpr,
     bs_col: tl.constexpr
@@ -50,23 +60,16 @@ def add_and_norm_kernel(
 def add_triton(
       input1: torch.Tensor,
       input2: torch.Tensor,
-      weight: torch.Tensor=None,
-      bias: torch.Tensor=None,
-      eps: float=None
 ) -> torch.Tensor:
     """
     Performs element wise addition b/w input1 and input2
-    and performs layer norm on the output
 
     Args:
-        input1 (torch.Tensor): _description_
-        input2 (torch.Tensor): _description_
-        weight (torch.Tensor): _description_
-        bias (torch.Tensor): _description_
-        eps (float): _description_
+        input1 (torch.Tensor): B * N * D
+        input2 (torch.Tensor): B * N * D
 
     Returns:
-        torch.Tensor: _description_
+        torch.Tensor: B * N * D
     """
 
     assert input1.is_contiguous() and input2.is_contiguous(), f"Input matrix needs to be contiguous"
@@ -76,7 +79,6 @@ def add_triton(
     B, N, D = input1.shape
 
     out = torch.empty_like(input1, device=input1.device, dtype=input1.dtype)
-    bs_row, bs_col = 16, 16 
 
     grid = lambda meta: (B, triton.cdiv(N, meta['bs_row']), triton.cdiv(D, meta['bs_col']))
 
@@ -90,11 +92,6 @@ def add_triton(
         num_rows=N,
         num_cols=D,
         out_ptr=out,
-        weight_ptr=None,
-        bias_ptr=None,
-        eps=None,
-        bs_row=bs_row,
-        bs_col=bs_col
     )
 
     return out
@@ -131,3 +128,46 @@ if __name__ == '__main__':
         print('Data does not match')
 
 
+    @triton.testing.perf_report(
+        triton.testing.Benchmark(
+            x_names=['N'],  # argument names to use as an x-axis for the plot
+            # different possible values for `x_name`
+            x_vals=[128*i for i in range(2, 15)],
+            # argument name whose value corresponds to a different line in the plot
+            line_arg='provider',
+            line_vals=[
+                'triton',
+                'torch',
+            ],
+            line_names=[
+                "Triton",
+                "Torch (native)",
+            ],
+            styles=[('blue', '-'), ('green', '-')],
+            ylabel="GB/s",
+            plot_name="Performance",
+            args={'B': 4, 'D': 768},  # values for function arguments not in `x_names` and `y_name`
+        ))
+    def benchmark(B, N, D, provider):
+        x = torch.randn(B, N, D, device='cuda', dtype=torch.float32)
+        y = torch.randn(B, N, D, device='cuda', dtype=torch.float32)
+
+        quantiles = [0.5, 0.2, 0.8]
+
+        if provider == 'triton':
+            ms, min_ms, max_ms = triton.testing.do_bench(
+                lambda: add_triton(x, y), quantiles=quantiles)
+        if provider == 'torch':
+            ms, min_ms, max_ms = triton.testing.do_bench(
+                lambda: torch.add(x, y), quantiles=quantiles)
+
+        def gbps(ms): return 2 * x.nelement() * \
+            x.element_size() * 1e-9 / (ms * 1e-3)
+
+        return gbps(ms), gbps(max_ms), gbps(min_ms)
+
+
+    benchmark.run(
+        show_plots=True,
+        print_data=True
+    )
