@@ -86,7 +86,6 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     Returns:
         - {torch.Tensor}: Output tensor with (B, T, Cout)
 
-    #TODO: Handle (B, T, Cin) and (B, T, Cin) matrix mult, just need to add batch offset to output
     Output will be (B, T, T)
     """
     assert len(A.shape) == 3, "First input matrix needs to have 3 dimensions (B, T, C)"
@@ -95,8 +94,6 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     batch_size, M, K = A.shape
     K, N = B.shape
 
-    # m, n = 16, 16
-    # bsx, bsy = triton.next_power_of_2(n), triton.next_power_of_2(m)
     grid = lambda meta: (batch_size, triton.cdiv(M, meta["bsy"]), triton.cdiv(N, meta["bsx"]))
 
     O = torch.empty((batch_size, M, N)).to(A.device, A.dtype)

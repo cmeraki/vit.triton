@@ -43,7 +43,7 @@ class SelfAttention(nn.Module):
         # Inputs are B x N x d_out, B x N x d_out
         # Output is B x N x N
         # TODO: Need to implement 3 dim by 3 dim matrix mult kernel
-        attn_scores = matmul(q, k.T) 
+        attn_scores = matmul(q, k.T)
         # TODO: Fuse matmul and sqrt
         attn_scores = attn_scores/torch.sqrt(self.d_out)
         attn_scores = softmax(attn_scores)
