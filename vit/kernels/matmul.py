@@ -8,21 +8,21 @@ device = 'cuda:0'
 
 @triton.autotune(
   configs=[
-    # triton.Config({'bsy': 256, 'bsx': 256}, num_warps=16),
-    # triton.Config({'bsy': 128, 'bsx': 128}, num_warps=16),
-    # triton.Config({'bsy': 64, 'bsx': 64}, num_warps=16),
-    # triton.Config({'bsy': 32, 'bsx': 32}, num_warps=16),
-    # triton.Config({'bsy': 16, 'bsx': 16}, num_warps=16),
-    # triton.Config({'bsy': 256, 'bsx': 256}, num_warps=8),
-    # triton.Config({'bsy': 128, 'bsx': 128}, num_warps=8),
-    # triton.Config({'bsy': 64, 'bsx': 64}, num_warps=8),
-    # triton.Config({'bsy': 32, 'bsx': 32}, num_warps=8),
-    # triton.Config({'bsy': 16, 'bsx': 16}, num_warps=8),
-    # triton.Config({'bsy': 256, 'bsx': 256}, num_warps=4),
-    # triton.Config({'bsy': 128, 'bsx': 128}, num_warps=4),
-    # triton.Config({'bsy': 64, 'bsx': 64}, num_warps=4),
-    # triton.Config({'bsy': 32, 'bsx': 32}, num_warps=4),
-    triton.Config({'bsy': 16, 'bsx': 16}, num_warps=4), 
+    triton.Config({'bsy': 256, 'bsx': 256, 'bsk': 256}, num_warps=16),
+    triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128}, num_warps=16),
+    triton.Config({'bsy': 64, 'bsx': 64, 'bsk': 64}, num_warps=16),
+    triton.Config({'bsy': 32, 'bsx': 32, 'bsk': 32}, num_warps=16),
+    triton.Config({'bsy': 16, 'bsx': 16, 'bsk': 16}, num_warps=16),
+    triton.Config({'bsy': 256, 'bsx': 256, 'bsk': 256}, num_warps=8),
+    triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128}, num_warps=8),
+    triton.Config({'bsy': 64, 'bsx': 64, 'bsk': 64}, num_warps=8),
+    triton.Config({'bsy': 32, 'bsx': 32, 'bsk': 32}, num_warps=8),
+    triton.Config({'bsy': 16, 'bsx': 16, 'bsk': 16}, num_warps=8),
+    triton.Config({'bsy': 256, 'bsx': 256, 'bsk': 256}, num_warps=4),
+    triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128}, num_warps=4),
+    triton.Config({'bsy': 64, 'bsx': 64, 'bsk': 64}, num_warps=4),
+    triton.Config({'bsy': 32, 'bsx': 32, 'bsk': 32}, num_warps=4),
+    triton.Config({'bsy': 16, 'bsx': 16, 'bsk': 16}, num_warps=4), 
   ],
   key=['M', 'N', 'K'],
 )
@@ -34,8 +34,8 @@ def matmul_kernel(
     B_stride_height, B_stride_width,
     O_stride_batch,
     O_stride_height, O_stride_width,
-    M, N, K: tl.constexpr,
-    bsx: tl.constexpr, bsy: tl.constexpr
+    M, N, K,
+    bsx: tl.constexpr, bsy: tl.constexpr, bsk: tl.constexpr
 ):
     """
     Matrix multiplication by loading rows of A
@@ -50,31 +50,36 @@ def matmul_kernel(
     col_idx = tl.program_id(axis=2)
 
     offset_batch = batch_idx * A_stride_batch
-    offset_k = tl.arange(0, K)
 
-    # Read offsets from A_ptr
-    offset_a = row_idx * bsy + tl.arange(0, bsy)
-    offset_a = offset_a[:, None]*A_stride_height + offset_k[None, :]*A_stride_width  # by * K
-    mask_a = row_idx * bsy + tl.arange(0, bsy)
-    mask_a = (mask_a[:, None] < M) & (offset_k[None, :] < K)
-    a = tl.load(A_ptr + offset_batch + offset_a, mask_a)
+    output = tl.zeros((bsy, bsx), dtype=tl.float32)
 
-    # Read offset from B_ptr
-    offset_b = col_idx * bsx + tl.arange(0, bsx)
-    offset_b = offset_k[:, None]*B_stride_height + offset_b[None, :]*B_stride_width  # K * bx
-    mask_b = col_idx * bsx + tl.arange(0, bsx)
-    mask_b = (offset_k[:, None] < K) & (mask_b[None, :] < N)
-    b = tl.load(B_ptr + offset_b, mask_b)
+    for offset in range(0, K, bsk):
+        offset_k = offset + tl.arange(0, bsk)
 
-    o = tl.dot(a, b)
+        # Read offsets from A_ptr
+        offset_a = row_idx * bsy + tl.arange(0, bsy)
+        offset_a = offset_a[:, None]*A_stride_height + offset_k[None, :]*A_stride_width  # bsy * bsk
+        mask_a = row_idx * bsy + tl.arange(0, bsy)
+        mask_a = (mask_a[:, None] < M) & (offset_k[None, :] < K)
+        a = tl.load(A_ptr + offset_batch + offset_a, mask_a)
+
+        # Read offset from B_ptr
+        offset_b = col_idx * bsx + tl.arange(0, bsx)
+        offset_b = offset_k[:, None]*B_stride_height + offset_b[None, :]*B_stride_width  # bsk * bsx
+        mask_b = col_idx * bsx + tl.arange(0, bsx)
+        mask_b = (offset_k[:, None] < K) & (mask_b[None, :] < N)
+        b = tl.load(B_ptr + offset_b, mask_b)
+
+        o = tl.dot(a, b) # bsy, bsx
+        output += o
 
     offset_batch_out = batch_idx * O_stride_batch
     offset_or = row_idx * bsy + tl.arange(0, bsy)
     offset_oc = col_idx * bsx + tl.arange(0, bsx)
-    offset_o = offset_or[:, None]*O_stride_height+ offset_oc[None, :]*O_stride_width  # by * bx
+    offset_o = offset_or[:, None]*O_stride_height+ offset_oc[None, :]*O_stride_width  # bsy * bsx
     mask_o = (offset_or[:, None] < M) & (offset_oc[None, :] < N)
 
-    tl.store(O_ptr + offset_batch_out + offset_o, o, mask_o)
+    tl.store(O_ptr + offset_batch_out + offset_o, output, mask_o)
 
 @tensor_info('matmul')
 def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
@@ -149,7 +154,7 @@ if __name__ == '__main__':
 
     @triton.testing.perf_report(
         triton.testing.Benchmark(
-            x_names=["M", "N"],
+            x_names=["M", "N", "K"],
             x_vals=[64, 128, 256, 512, 1024, 2056, 4096],
             line_arg='provider',
             line_vals=[
@@ -164,7 +169,7 @@ if __name__ == '__main__':
             ylabel="GB/s",
             plot_name="Performance",
             # values for function arguments not in `x_names` and `y_name`
-            args={'batch_size': 1, 'K': 32},
+            args={'batch_size': 4},
         ))
     def benchmark(batch_size, M, N, K, provider):
         quantiles = [0.5, 0.2, 0.8]
