@@ -2,26 +2,27 @@ import torch
 import triton
 import triton.language as tl
 
+from vit.utils import tensor_info
+
 device = 'cuda:0'
 
 @triton.autotune(
   configs=[
-    triton.Config({'bsy': 128, 'bsx': 256}, num_warps=8),
-    triton.Config({'bsy': 64, 'bsx': 256}, num_warps=4),
-    triton.Config({'bsy': 128, 'bsx': 128}, num_warps=4),
-    triton.Config({'bsy': 128, 'bsx': 64}, num_warps=4),
-    triton.Config({'bsy': 64, 'bsx': 128}, num_warps=4),
-    triton.Config({'bsy': 128, 'bsx': 32}, num_warps=4),
-    triton.Config({'bsy': 64, 'bsx': 32}, num_warps=2),
-    triton.Config({'bsy': 32, 'bsx': 64}, num_warps=2),
-    triton.Config({'bsy': 128, 'bsx': 256}, num_warps=8),
-    triton.Config({'bsy': 256, 'bsx': 128}, num_warps=8),
-    triton.Config({'bsy': 256, 'bsx': 64,}, num_warps=4),
-    triton.Config({'bsy': 64, 'bsx': 256}, num_warps=4),
-    triton.Config({'bsy': 128, 'bsx': 128}, num_warps=4),
-    triton.Config({'bsy': 128, 'bsx': 64}, num_warps=4),
-    triton.Config({'bsy': 64, 'bsx': 128}, num_warps=4),
-    triton.Config({'bsy': 128, 'bsx': 32}, num_warps=4),
+    # triton.Config({'bsy': 256, 'bsx': 256}, num_warps=16),
+    # triton.Config({'bsy': 128, 'bsx': 128}, num_warps=16),
+    # triton.Config({'bsy': 64, 'bsx': 64}, num_warps=16),
+    # triton.Config({'bsy': 32, 'bsx': 32}, num_warps=16),
+    # triton.Config({'bsy': 16, 'bsx': 16}, num_warps=16),
+    # triton.Config({'bsy': 256, 'bsx': 256}, num_warps=8),
+    # triton.Config({'bsy': 128, 'bsx': 128}, num_warps=8),
+    # triton.Config({'bsy': 64, 'bsx': 64}, num_warps=8),
+    # triton.Config({'bsy': 32, 'bsx': 32}, num_warps=8),
+    # triton.Config({'bsy': 16, 'bsx': 16}, num_warps=8),
+    # triton.Config({'bsy': 256, 'bsx': 256}, num_warps=4),
+    # triton.Config({'bsy': 128, 'bsx': 128}, num_warps=4),
+    # triton.Config({'bsy': 64, 'bsx': 64}, num_warps=4),
+    # triton.Config({'bsy': 32, 'bsx': 32}, num_warps=4),
+    triton.Config({'bsy': 16, 'bsx': 16}, num_warps=4), 
   ],
   key=['M', 'N', 'K'],
 )
@@ -75,6 +76,7 @@ def matmul_kernel(
 
     tl.store(O_ptr + offset_batch_out + offset_o, o, mask_o)
 
+@tensor_info('matmul')
 def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     """
     Implements matrix multiplication between input matrix A and B
@@ -82,6 +84,11 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     Args:
         - A {torch.Tensor}: Input matrix with shape (B, T, Cin) where B is the batch size, T is the sequence length, Cin is the input dimension
         - B {torch.Tensor}: Weight matrix with shape (Cin, Cout) where Cout is the hidden dimension
+
+    Returns:
+        - {torch.Tensor}: Output tensor with (B, T, Cout)
+
+    Output will be (B, T, T)
     """
     assert len(A.shape) == 3, "First input matrix needs to have 3 dimensions (B, T, C)"
     assert A.device == B.device and A.is_cuda, "Both matrix should be on GPU"
@@ -89,8 +96,6 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     batch_size, M, K = A.shape
     K, N = B.shape
 
-    # m, n = 16, 16
-    # bsx, bsy = triton.next_power_of_2(n), triton.next_power_of_2(m)
     grid = lambda meta: (batch_size, triton.cdiv(M, meta["bsy"]), triton.cdiv(N, meta["bsx"]))
 
     O = torch.empty((batch_size, M, N)).to(A.device, A.dtype)
@@ -140,7 +145,43 @@ if __name__ == '__main__':
     print(f'Triton:\n{y_triton}')
 
     # Unit testing
-    if torch.allclose(y_triton, y_pytorch, atol=1e-2, rtol=0):
-        print("✅ Triton and Torch match")
-    else:
-        print("❌ Triton and Torch differ")
+    assert torch.allclose(y_triton, y_pytorch), "Data does not match"
+
+    @triton.testing.perf_report(
+        triton.testing.Benchmark(
+            x_names=["M", "N"],
+            x_vals=[64, 128, 256, 512, 1024, 2056, 4096],
+            line_arg='provider',
+            line_vals=[
+                'triton',
+                'torch',
+            ],
+            line_names=[
+                "Triton",
+                "Torch (native)",
+            ],
+            styles=[('blue', '-'), ('green', '-')],
+            ylabel="GB/s",
+            plot_name="Performance",
+            # values for function arguments not in `x_names` and `y_name`
+            args={'batch_size': 1, 'K': 32},
+        ))
+    def benchmark(batch_size, M, N, K, provider):
+        quantiles = [0.5, 0.2, 0.8]
+
+        A = torch.randint(0, 10, (batch_size, M, K), device='cuda', dtype=torch.float32)
+        B = torch.randint(0, 5, (K, N), device='cuda', dtype=torch.float32)
+
+        if provider == 'triton':
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul_triton(A, B), quantiles=quantiles)
+        if provider == 'torch':
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(A, B), quantiles=quantiles)
+
+        def gbps(ms): return 2 * M * N * K * 1e-12 / (ms * 1e-3)
+
+        return gbps(ms), gbps(max_ms), gbps(min_ms)
+
+    benchmark.run(
+        show_plots=True,
+        print_data=True
+    )

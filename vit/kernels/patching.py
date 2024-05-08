@@ -3,10 +3,7 @@ import torch
 import triton
 import triton.language as tl
 
-from loguru import logger
-
-logger.remove()
-logger.add(sys.stdout, format="[{time: YYYY-MM-DD HH:mm:ss} {level}] {message}", level="INFO")
+from vit.utils import tensor_info
 
 device = 'cuda:0'
 
@@ -57,6 +54,7 @@ def patching_kernel(
     tl.store(out_ptr + batch_offset + out_offset + P*P*2, tl.ravel(img_b), mask=out_mask)
 
 
+@tensor_info('patching')
 def patching_triton(image: torch.Tensor, patch_size: int) -> torch.Tensor:
     """
     Patching function which calls triton kernel
@@ -77,8 +75,6 @@ def patching_triton(image: torch.Tensor, patch_size: int) -> torch.Tensor:
     # Every block will handle a 2D patch
     block_x, block_y = triton.next_power_of_2(patch_size), triton.next_power_of_2(patch_size)
     grid = lambda meta: (B, triton.cdiv(H, block_y), triton.cdiv(W, block_x))
-
-    logger.info(f'Patching kernel - N:{N}, Block size: {(block_x, block_y)}, grid: {grid}, image stride: {image.stride()}')
 
     output = torch.empty(size=(B, N, patch_size*patch_size*C)).to(device=image.device, dtype=image.dtype)
     patching_kernel[grid](
@@ -135,8 +131,52 @@ if __name__ == '__main__':
     patches_pytorch = patching_torch(A, patch_size)
     patches_triton = patching_triton(A, patch_size)
 
+    print(f"Output size: {patches_triton.shape}")
+
     print(f'Original matrix:\n{A}')
     print(f'PyTorch patching:\n{patches_pytorch}')
     print(f'Triton patching:\n{patches_triton}')
 
-    assert torch.allclose(patches_pytorch, patches_triton), 'Data does not match'
+    assert torch.allclose(patches_pytorch, patches_triton, atol=1e-2, rtol=0), 'Data does not match'
+
+    @triton.testing.perf_report(
+        triton.testing.Benchmark(
+            x_names=['height'], # argument names to use as an x-axis for the plot
+            # different possible values for `x_name`
+            x_vals=[128*i for i in range(2, 50, 2)],
+            # argument name whose value corresponds to a different line in the plot
+            line_arg='provider',
+            line_vals=[
+                'triton',
+                'torch',
+            ],
+            line_names=[
+                "Triton",
+                "Torch (native)",
+            ],
+            styles=[('blue', '-'), ('green', '-')],
+            ylabel="GB/s",
+            plot_name="Performance",
+            # values for function arguments not in `x_names` and `y_name`
+            args={'batch_size': 1, 'patch_size': 16},
+        ))
+    def benchmark(batch_size, height, patch_size, provider):
+        quantiles = [0.5, 0.2, 0.8]
+        width = height
+        channels = 3
+
+        a = torch.arange(1, batch_size * height * width * channels + 1, dtype=torch.float32).view(batch_size, channels, height, width).to(device)
+
+        if provider == 'triton':
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: patching_triton(a, patch_size), quantiles=quantiles)
+        if provider == 'torch':
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: patching_torch(a, patch_size), quantiles=quantiles)
+
+        def gbps(ms): return 2 * a.nelement() * a.element_size() * 1e-9 / (ms * 1e-3)
+
+        return gbps(ms), gbps(max_ms), gbps(min_ms)
+
+    benchmark.run(
+        show_plots=True,
+        print_data=True
+    )
