@@ -21,6 +21,7 @@ def tensor_info(func_name):
 
             results = func(*args, **kwargs)
 
+            logger.info(f"Function {func_name} exited")
             if isinstance(results, torch.Tensor):
                 logger.info(f"Output\t{results.name if hasattr(results, 'name') else 'No Name'}\t{results.shape}")
             elif isinstance(results, (tuple, list)):

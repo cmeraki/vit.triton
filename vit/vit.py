@@ -1,3 +1,4 @@
+import math
 import torch
 from torch import nn
 
@@ -7,7 +8,8 @@ from vit.kernels import (
     matmul,
     softmax,
     layernorm,
-    add
+    add,
+    matmul3
 )
 
 from loguru import logger
@@ -44,15 +46,16 @@ class SelfAttention(nn.Module):
 
         # Inputs are B x N x d_out, B x N x d_out
         # Output is B x N x N
-        attn_scores = matmul(q, k.T)
+        k = k.transpose(1, 2).contiguous()
+        attn_scores = matmul3(q, k)
 
         # TODO: Fuse matmul and sqrt
-        attn_scores = attn_scores/torch.sqrt(self.d_out)
+        attn_scores = attn_scores/math.sqrt(self.d_out)
         attn_scores = softmax(attn_scores)
 
         # Inputs are B x N x N, B x N x d_out
         # Output is B x N x d_out
-        context_vec = matmul(attn_scores, v)
+        context_vec = matmul3(attn_scores, v)
 
         return context_vec
 
@@ -112,6 +115,9 @@ class Transformer(nn.Module):
         self.d_in = d_in
         self.d_out = d_out
 
+        self.layernorm_weight = nn.Parameter(torch.randn(self.d_in, 1)).to(device, dtype)
+        self.layernorm_bias = nn.Parameter(torch.randn(self.d_in, 1)).to(device, dtype)
+        self.eps = 1e-5
 
         self.mha = MultiHeadAttention(self.num_heads, self.d_in, self.d_out)
         self.ffn_1 = nn.Parameter(torch.randn(self.d_in, 4*self.d_in)).to(device, dtype)
@@ -123,7 +129,12 @@ class Transformer(nn.Module):
 
         # Skip connection
         intermediate = add(attn, x)
-        intermediate = layernorm(intermediate)
+        intermediate = layernorm(
+            intermediate,
+            self.layernorm_weight,
+            self.layernorm_bias,
+            self.eps
+        )
 
         # B x N x 4D_out
         out = matmul(intermediate, self.ffn_1)
@@ -194,16 +205,16 @@ if __name__ == '__main__':
     import requests
     import numpy as np
 
-    height, width = 128, 128
+    height, width = 256, 256
 
     model = VIT(
         height=height,
         width=width,
         channels=3,
         patch_size=16,
-        hidden_dim=256,
-        num_heads=1,
-        num_layers=1
+        hidden_dim=768,
+        num_heads=12,
+        num_layers=12
     )
 
     url = 'http://images.cocodataset.org/val2017/000000039769.jpg'

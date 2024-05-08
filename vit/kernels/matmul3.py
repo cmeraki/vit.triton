@@ -79,7 +79,7 @@ def matmul_kernel(
 
     tl.store(O_ptr + offset_out_batch + offset_o, out, mask_o)
 
-tensor_info('matmul3')
+@tensor_info('matmul3')
 def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     """
     Implements matrix multiplication between input matrix A and B
@@ -90,22 +90,20 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
 
     Returns:
         - {torch.Tensor}: Output tensor with (B, T, Cout)
-
-    Output will be (B, T, T)
     """
     assert len(A.shape) == 3, "First input matrix needs to have 3 dimensions (B, T, C)"
     assert len(A.shape) == len(B.shape), "Both matrix should be 3 dimensional"
-    assert A.shape[0] == B.shape[0], f"First dimension of both the matrix should be same, (batch size), provided: {A.shape[0]} {B.shape[0]}"
     assert A.shape[2] == B.shape[1], f"Dimensions are not compatible for matrix multiplication, provided: {A.shape}, {B.shape}"
     assert A.device == B.device and A.is_cuda, "Both matrix should be on GPU"
     assert A.is_contiguous(), "First matrix is not contiguous"
     assert B.is_contiguous(), "Second matrix is not contiguous"
 
     batch_size, seq_len, dim = A.shape
+    dim_out = B.shape[-1]
 
-    grid = lambda meta: (batch_size, triton.cdiv(seq_len, meta["bsy"]), triton.cdiv(seq_len, meta["bsx"]))
+    grid = lambda meta: (batch_size, triton.cdiv(seq_len, meta["bsy"]), triton.cdiv(dim_out, meta["bsx"]))
 
-    O = torch.empty((batch_size, seq_len, seq_len)).to(A.device, A.dtype)
+    O = torch.empty((batch_size, seq_len, dim_out)).to(A.device, A.dtype)
 
     matmul_kernel[grid](
         A, B, O,
@@ -135,19 +133,19 @@ if __name__ == '__main__':
     
     parser.add_argument('-batch_size', type=int)
     parser.add_argument('-seq_len', type=int)
-    parser.add_argument('-dim', type=int)
+    parser.add_argument('-din', type=int)
+    parser.add_argument('-dout', type=int)
 
     args = parser.parse_args()
     print(f'Args: {args}')
 
     batch_size = args.batch_size
     seq_len = args.seq_len
-    dim = args.dim
+    din = args.din
+    dout = args.dout
 
-    A = torch.randint(0, 5, (batch_size, seq_len, dim), device='cuda', dtype=torch.float32)
-    B = torch.randint(0, 5, (batch_size, seq_len, dim), device='cuda', dtype=torch.float32)
-
-    assert A.shape == B.shape, 'Matrix sizes are not the same'
+    A = torch.randint(0, 5, (batch_size, seq_len, din), device='cuda', dtype=torch.float32)
+    B = torch.randint(0, 5, (batch_size, dout, din), device='cuda', dtype=torch.float32)
 
     B = B.transpose(1, 2).contiguous()
     y_pytorch = torch.matmul(A, B)
@@ -164,8 +162,8 @@ if __name__ == '__main__':
 
     @triton.testing.perf_report(
         triton.testing.Benchmark(
-            x_names=["M", "N"],
-            x_vals=[64, 128, 256, 512, 1024, 2056, 4096],
+            x_names=["seq_len", "dim"],
+            x_vals=[64, 128, 256, 512, 1024],
             line_arg='provider',
             line_vals=[
                 'triton',
@@ -179,22 +177,22 @@ if __name__ == '__main__':
             ylabel="GB/s",
             plot_name="Performance",
             # values for function arguments not in `x_names` and `y_name`
-            args={'batch_size': 1, 'K': 32},
+            args={'batch_size': 1},
         ))
-    def benchmark(batch_size, M, N, K, provider):
+    def benchmark(batch_size, seq_len, dim, provider):
         quantiles = [0.5, 0.2, 0.8]
 
-        A = torch.randint(0, 5, (batch_size, seq_len, dim), device='cuda', dtype=torch.float32)
-        B = torch.randint(0, 5, (batch_size, seq_len, dim), device='cuda', dtype=torch.float32)
+        x = torch.randint(0, 5, (batch_size, seq_len, dim), device='cuda', dtype=torch.float32)
+        y = torch.randint(0, 5, (batch_size, seq_len, dim), device='cuda', dtype=torch.float32)
 
-        B = B.transpose(1, 2).contiguous()
+        y = y.transpose(1, 2).contiguous()
 
         if provider == 'triton':
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul_triton(A, B), quantiles=quantiles)
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul_triton(x, y), quantiles=quantiles)
         if provider == 'torch':
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(A, B), quantiles=quantiles)
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(x, y), quantiles=quantiles)
 
-        def gbps(ms): return 2 * M * N * K * 1e-12 / (ms * 1e-3)
+        def gbps(ms): return 2 * seq_len * dim * batch_size * 1e-12 / (ms * 1e-3)
 
         return gbps(ms), gbps(max_ms), gbps(min_ms)
 

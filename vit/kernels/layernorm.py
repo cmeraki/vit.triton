@@ -3,7 +3,7 @@ import triton
 import triton.language as tl
 
 device = 'cuda'
-dtype = torch.float16
+dtype = torch.float32
 
 @triton.autotune(
     configs=[
