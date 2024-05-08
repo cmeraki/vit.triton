@@ -51,7 +51,7 @@ def softmax_triton(A: torch.Tensor) -> torch.Tensor:
 
     batch, rows, cols = A.shape
 
-    output = torch.empty(size=A.shape).to(device, dtype)
+    output = torch.empty_like(A)
 
     BLOCK_SIZE = triton.next_power_of_2(cols)
     grid = (batch, rows, )

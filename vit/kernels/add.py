@@ -79,7 +79,7 @@ def add_triton(
 
     B, N, D = input1.shape
 
-    out = torch.empty_like(input1, device=input1.device, dtype=input1.dtype)
+    out = torch.empty_like(input1)
 
     grid = lambda meta: (B, triton.cdiv(N, 256), triton.cdiv(D, 256))
 

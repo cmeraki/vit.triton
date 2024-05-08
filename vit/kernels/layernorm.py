@@ -106,7 +106,7 @@ def layernorm_triton(A: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, 
     assert len(A.shape) == 3, f"Only 3 dimensional matrix is supported as input"
 
     # Output tensor
-    O = torch.empty_like(A, device='cuda', dtype=dtype)
+    O = torch.empty_like(A)
 
     batches, seq_len, dim = A.shape
     grid = (batches, seq_len, )
