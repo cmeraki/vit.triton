@@ -3,10 +3,7 @@ import torch
 import triton
 import triton.language as tl
 
-from loguru import logger
-
-logger.remove()
-logger.add(sys.stdout, format="[{time: YYYY-MM-DD HH:mm:ss} {level}] {message}", level="INFO")
+from vit.utils import tensor_info
 
 device = 'cuda:0'
 
@@ -57,6 +54,7 @@ def patching_kernel(
     tl.store(out_ptr + batch_offset + out_offset + P*P*2, tl.ravel(img_b), mask=out_mask)
 
 
+@tensor_info('patching')
 def patching_triton(image: torch.Tensor, patch_size: int) -> torch.Tensor:
     """
     Patching function which calls triton kernel
@@ -77,8 +75,6 @@ def patching_triton(image: torch.Tensor, patch_size: int) -> torch.Tensor:
     # Every block will handle a 2D patch
     block_x, block_y = triton.next_power_of_2(patch_size), triton.next_power_of_2(patch_size)
     grid = lambda meta: (B, triton.cdiv(H, block_y), triton.cdiv(W, block_x))
-
-    # logger.info(f'Patching kernel - N:{N}, Block size: {(block_x, block_y)}, grid: {grid}, image stride: {image.stride()}')
 
     output = torch.empty(size=(B, N, patch_size*patch_size*C)).to(device=image.device, dtype=image.dtype)
     patching_kernel[grid](
@@ -134,6 +130,8 @@ if __name__ == '__main__':
     A = torch.arange(1, batch_size * height * width * channels + 1, dtype=torch.float32).view(batch_size, channels, height, width).to(device)
     patches_pytorch = patching_torch(A, patch_size)
     patches_triton = patching_triton(A, patch_size)
+
+    print(f"Output size: {patches_triton.shape}")
 
     print(f'Original matrix:\n{A}')
     print(f'PyTorch patching:\n{patches_pytorch}')

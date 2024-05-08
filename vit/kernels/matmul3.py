@@ -2,6 +2,8 @@ import torch
 import triton
 import triton.language as tl
 
+from vit.utils import tensor_info
+
 device = 'cuda:0'
 
 @triton.autotune(
@@ -77,6 +79,7 @@ def matmul_kernel(
 
     tl.store(O_ptr + offset_out_batch + offset_o, out, mask_o)
 
+tensor_info('matmul3')
 def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     """
     Implements matrix multiplication between input matrix A and B

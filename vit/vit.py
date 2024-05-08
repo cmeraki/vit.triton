@@ -1,14 +1,16 @@
 import torch
 from torch import nn
 
-from .utils import tensor_info
-from kernels import (
+from vit.utils import tensor_info
+from vit.kernels import (
     patching,
     matmul,
     softmax,
     layernorm,
     add
 )
+
+from loguru import logger
 
 device = 'cuda:0'
 dtype = torch.float32
@@ -31,7 +33,7 @@ class SelfAttention(nn.Module):
         self.k_proj = nn.Parameter(torch.randn(self.d_in, self.d_out)).to(device, dtype)
         self.v_proj = nn.Parameter(torch.randn(self.d_in, self.d_out)).to(device, dtype)
 
-    @tensor_info
+    @tensor_info('self-attn')
     def forward(self, x: torch.Tensor) -> torch.Tensor:
 
         # All three are B x N x d_out
@@ -42,8 +44,8 @@ class SelfAttention(nn.Module):
 
         # Inputs are B x N x d_out, B x N x d_out
         # Output is B x N x N
-        # TODO: Need to implement 3 dim by 3 dim matrix mult kernel
         attn_scores = matmul(q, k.T)
+
         # TODO: Fuse matmul and sqrt
         attn_scores = attn_scores/torch.sqrt(self.d_out)
         attn_scores = softmax(attn_scores)
@@ -76,7 +78,7 @@ class MultiHeadAttention(nn.Module):
             self.layers.append(SelfAttention(d_in=d_in, d_out=d_out))
 
 
-    @tensor_info
+    @tensor_info('mha')
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         outputs = []
         for i in range(self.num_heads):
@@ -110,16 +112,16 @@ class Transformer(nn.Module):
         self.d_in = d_in
         self.d_out = d_out
 
+
         self.mha = MultiHeadAttention(self.num_heads, self.d_in, self.d_out)
-        self.ffn_1 = nn.Parameter(self.d_in, 4*self.d_in).to(device, dtype)
-        self.ffn_2 = nn.Parameter(4*self.d_in, self.d_in).to(device, dtype)
-    
+        self.ffn_1 = nn.Parameter(torch.randn(self.d_in, 4*self.d_in)).to(device, dtype)
+        self.ffn_2 = nn.Parameter(torch.randn(4*self.d_in, self.d_in)).to(device, dtype)
+
     def forward(self, x):
         # B x N x D_out
         attn = self.mha(x)
 
         # Skip connection
-        # TODO: possible to fuse the two kernels?
         intermediate = add(attn, x)
         intermediate = layernorm(intermediate)
 
@@ -159,13 +161,17 @@ class VIT(nn.Module):
         self.num_heads = num_heads
         self.num_layers = num_layers
 
+        assert self.hidden_dim % self.num_heads == 0, f"Hidden dimension should be divisible by number of heads, provided: {self.hidden_dim} {self.num_heads}"
+
         num_patches = (self.height//self.patch_size) * (self.width//self.patch_size)
         patch_dim = self.patch_size*self.patch_size*self.channels
+        d_out = int(self.hidden_dim/self.num_heads)
+
 
         # Layers initialization
         self.projection = nn.Parameter(torch.randn(patch_dim, self.hidden_dim)).to(device, dtype)
         self.positional_embedding = nn.Parameter(torch.randn(1, num_patches, self.hidden_dim)).to(device, dtype)
-        self.transformer_blocks = [Transformer(num_heads=self.num_heads, d_in=self.hidden_dim, d_out=self.num_heads/self.hidden_dim) for _ in range(self.num_layers)]
+        self.transformer_blocks = [Transformer(num_heads=self.num_heads, d_in=self.hidden_dim, d_out=d_out) for _ in range(self.num_layers)]
 
     def forward(self, x):
         print(f'Image shape provided: {x.shape}')
@@ -188,7 +194,7 @@ if __name__ == '__main__':
     import requests
     import numpy as np
 
-    height, width = 224, 224
+    height, width = 128, 128
 
     model = VIT(
         height=height,
@@ -196,8 +202,8 @@ if __name__ == '__main__':
         channels=3,
         patch_size=16,
         hidden_dim=256,
-        num_heads=12,
-        num_layers=12
+        num_heads=1,
+        num_layers=1
     )
 
     url = 'http://images.cocodataset.org/val2017/000000039769.jpg'

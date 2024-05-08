@@ -2,6 +2,8 @@ import torch
 import triton
 import triton.language as tl
 
+from vit.utils import tensor_info
+
 device = 'cuda:0'
 
 
@@ -56,7 +58,7 @@ def add_and_norm_kernel(
 
     tl.store(out_ptr + batch_offset + data_offset, add, mask=data_mask)
 
-
+@tensor_info('add')
 def add_triton(
       input1: torch.Tensor,
       input2: torch.Tensor,

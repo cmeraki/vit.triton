@@ -2,26 +2,27 @@ import torch
 import triton
 import triton.language as tl
 
+from vit.utils import tensor_info
+
 device = 'cuda:0'
 
 @triton.autotune(
   configs=[
-    triton.Config({'bsy': 128, 'bsx': 256}, num_warps=8),
-    triton.Config({'bsy': 64, 'bsx': 256}, num_warps=4),
-    triton.Config({'bsy': 128, 'bsx': 128}, num_warps=4),
-    triton.Config({'bsy': 128, 'bsx': 64}, num_warps=4),
-    triton.Config({'bsy': 64, 'bsx': 128}, num_warps=4),
-    triton.Config({'bsy': 128, 'bsx': 32}, num_warps=4),
-    triton.Config({'bsy': 64, 'bsx': 32}, num_warps=2),
-    triton.Config({'bsy': 32, 'bsx': 64}, num_warps=2),
-    triton.Config({'bsy': 128, 'bsx': 256}, num_warps=8),
-    triton.Config({'bsy': 256, 'bsx': 128}, num_warps=8),
-    triton.Config({'bsy': 256, 'bsx': 64,}, num_warps=4),
-    triton.Config({'bsy': 64, 'bsx': 256}, num_warps=4),
-    triton.Config({'bsy': 128, 'bsx': 128}, num_warps=4),
-    triton.Config({'bsy': 128, 'bsx': 64}, num_warps=4),
-    triton.Config({'bsy': 64, 'bsx': 128}, num_warps=4),
-    triton.Config({'bsy': 128, 'bsx': 32}, num_warps=4),
+    # triton.Config({'bsy': 256, 'bsx': 256}, num_warps=16),
+    # triton.Config({'bsy': 128, 'bsx': 128}, num_warps=16),
+    # triton.Config({'bsy': 64, 'bsx': 64}, num_warps=16),
+    # triton.Config({'bsy': 32, 'bsx': 32}, num_warps=16),
+    # triton.Config({'bsy': 16, 'bsx': 16}, num_warps=16),
+    # triton.Config({'bsy': 256, 'bsx': 256}, num_warps=8),
+    # triton.Config({'bsy': 128, 'bsx': 128}, num_warps=8),
+    # triton.Config({'bsy': 64, 'bsx': 64}, num_warps=8),
+    # triton.Config({'bsy': 32, 'bsx': 32}, num_warps=8),
+    # triton.Config({'bsy': 16, 'bsx': 16}, num_warps=8),
+    # triton.Config({'bsy': 256, 'bsx': 256}, num_warps=4),
+    # triton.Config({'bsy': 128, 'bsx': 128}, num_warps=4),
+    # triton.Config({'bsy': 64, 'bsx': 64}, num_warps=4),
+    # triton.Config({'bsy': 32, 'bsx': 32}, num_warps=4),
+    triton.Config({'bsy': 16, 'bsx': 16}, num_warps=4), 
   ],
   key=['M', 'N', 'K'],
 )
@@ -75,6 +76,7 @@ def matmul_kernel(
 
     tl.store(O_ptr + offset_batch_out + offset_o, o, mask_o)
 
+@tensor_info('matmul')
 def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     """
     Implements matrix multiplication between input matrix A and B
