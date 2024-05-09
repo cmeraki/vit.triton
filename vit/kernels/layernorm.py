@@ -126,6 +126,20 @@ def layernorm_triton(A: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, 
 
     return O
 
+class LayerNormTriton(torch.nn.Module):
+    def __init__(self, dim: int, eps: float = 1e-5):
+        super().__init__()
+
+        self.dim = dim
+        self.eps = eps
+
+        self.weight = torch.nn.Parameter(torch.randn(self.dim))
+        self.bias = torch.nn.Parameter(torch.randn(self.dim))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return layernorm_triton(
+            x, self.weight, self.bias, self.eps
+        )
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
