@@ -7,9 +7,9 @@ from vit.kernels import (
     patching,
     matmul,
     softmax,
-    LayerNormTriton,
     add,
-    matmul3
+    matmul3,
+    LayerNormTriton,
 )
 
 from loguru import logger
@@ -24,8 +24,8 @@ class LinearWithBias(nn.Module):
     def __init__(self, input_dim: int, output_dim: int):
         super().__init__()
 
-        self.weight = nn.Parameter(torch.randn(input_dim, output_dim))
-        self.bias = nn.Parameter(torch.randn(output_dim))
+        self.weight = nn.Parameter(torch.zeros(input_dim, output_dim))
+        self.bias = nn.Parameter(torch.zeros(output_dim))
 
     @tensor_info('linear')
     def forward(self, x) -> torch.Tensor:
@@ -131,11 +131,11 @@ class Transformer(nn.Module):
         self.d_out = d_out
 
         self.attention = MultiHeadAttention(self.num_heads, self.d_in, self.d_out)
-        self.intermediate = nn.Parameter(torch.randn(self.d_in, 4*self.d_in))
-        self.output = nn.Parameter(torch.randn(4*self.d_in, self.d_in))
+        self.intermediate = LinearWithBias(self.d_in, 4*self.d_in)
+        self.output = LinearWithBias(4*self.d_in, self.d_in)
 
-        self.layernorm_before = LayerNormTriton(self.d_in)
-        self.layernorm_after = LayerNormTriton(self.d_in)
+        self.layernorm_before = LayerNormTriton(self.d_in, eps=1e-12)
+        self.layernorm_after = LayerNormTriton(self.d_in, eps=1e-12)
 
     @tensor_info('transformer')
     def forward(self, x):
@@ -147,9 +147,9 @@ class Transformer(nn.Module):
         res = self.layernorm_before(res)
 
         # B x N x 4D_out
-        out = matmul(res, self.intermediate)
+        out = self.intermediate(res)
         # B x N x D_out
-        out = matmul(out, self.output)
+        out = self.output(out)
 
         # Skip connection
         out = add(out, res)
@@ -182,9 +182,11 @@ class Embeddings(nn.Module):
     def __init__(self, patch_size, num_patches, patch_dim, hidden_dim):
         super().__init__()
 
+
         self.patch_size = patch_size
 
-        self.position_embeddings = nn.Parameter(torch.randn(1, num_patches, hidden_dim))
+        self.cls_token = torch.Tensor((1, 1, hidden_dim))
+        self.position_embeddings = nn.Parameter(torch.zeros(1, num_patches+1, hidden_dim))
         self.projection = LinearWithBias(patch_dim, hidden_dim)
 
     @tensor_info('embedding')
@@ -194,6 +196,7 @@ class Embeddings(nn.Module):
 
         # TODO: Possible to fuse kernels?
         x = self.projection(x)
+        x = torch.cat([x, self.cls_token])
         x = add(x, self.position_embeddings)
 
         return x

@@ -133,8 +133,8 @@ class LayerNormTriton(torch.nn.Module):
         self.dim = dim
         self.eps = eps
 
-        self.weight = torch.nn.Parameter(torch.randn(self.dim))
-        self.bias = torch.nn.Parameter(torch.randn(self.dim))
+        self.weight = torch.nn.Parameter(torch.zeros(self.dim))
+        self.bias = torch.nn.Parameter(torch.zeros(self.dim))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return layernorm_triton(
