@@ -2,8 +2,8 @@ import math
 import torch
 from torch import nn
 
-from vit.utils import tensor_info
-from vit.kernels import (
+from .utils import tensor_info, transfer_pretrained_weights
+from .kernels import (
     patching,
     matmul,
     softmax,
@@ -253,7 +253,7 @@ if __name__ == '__main__':
     import requests
     import numpy as np
 
-    height, width = 256, 256
+    height, width = 224, 224
 
     model = VIT(
         height=height,
@@ -265,6 +265,12 @@ if __name__ == '__main__':
         num_layers=12
     )
     model.to(device, dtype)
+
+    model = transfer_pretrained_weights(
+        model_id='google/vit-base-patch16-224',
+        custom_model=model
+    )
+
 
     url = 'http://images.cocodataset.org/val2017/000000039769.jpg'
     image = Image.open(requests.get(url, stream=True).raw)
