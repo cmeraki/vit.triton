@@ -75,7 +75,7 @@ def add_triton(
 
     assert input1.is_contiguous() and input2.is_contiguous(), f"Input matrix needs to be contiguous"
     assert len(input1.shape) == 3, f"Only 3 dimensional input shapes are supported, provided: {input1.shape}"
-    assert input1.shape == input2.shape, f"Input shapes need to be same, provided {input1.shape}, {input2.shape}"
+    assert input1.shape == input2.shape, f"Input shapes need to be same, provided {input2.shape}, {input2.shape}"
 
     B, N, D = input1.shape
 

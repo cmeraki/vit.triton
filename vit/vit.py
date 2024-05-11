@@ -17,8 +17,8 @@ from loguru import logger
 device = 'cuda:0'
 dtype = torch.float32
 
-# TODO: Fuse matmul and bias
-# TODO: Add activation support
+# TODO: P0 Fuse matmul and bias
+# TODO: P0 Add activation support
 
 class LinearWithBias(nn.Module):
     def __init__(self, input_dim: int, output_dim: int):
@@ -30,7 +30,7 @@ class LinearWithBias(nn.Module):
     @tensor_info('linear')
     def forward(self, x) -> torch.Tensor:
         x = matmul(x, self.weight)
-        # TODO: Handle broadcast addition
+        # TODO: P1 Handle broadcast addition
         x = torch.add(x, self.bias)
 
         return x
@@ -41,7 +41,7 @@ class SelfAttention(nn.Module):
         self,
         d_in: int,
         d_out: int,
-        dropout: int = 0, #TODO: Add dropout support
+        dropout: int = 0, #TODO: P1 Add dropout support
     ):
         super().__init__()
         self.d_in = d_in
@@ -56,7 +56,7 @@ class SelfAttention(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
 
         # All three are B x N x d_out
-        # TODO: Possible to merge all these 3 matmuls in single kernel?
+        # TODO: P2 Possible to merge all these 3 matmuls in single kernel?
         q = self.query(x)
         k = self.key(x)
         v = self.value(x)
@@ -66,7 +66,7 @@ class SelfAttention(nn.Module):
         k = k.transpose(1, 2).contiguous()
         attn_scores = matmul3(q, k)
 
-        # TODO: Fuse matmul and sqrt
+        # TODO: P2 Fuse matmul and sqrt
         attn_scores = attn_scores/math.sqrt(self.d_out)
         attn_scores = softmax(attn_scores)
 
@@ -102,7 +102,7 @@ class MultiHeadAttention(nn.Module):
         for attn in self.attention:
             # Naive: Process one head at a time
             # Each elem in output will be B x N x d_out
-            # TODO: Implement MHA in a more optimized kernel
+            # TODO: P2 Implement MHA in a more optimized kernel
             outputs.append(
                 attn(x)
             )
@@ -194,7 +194,7 @@ class Embeddings(nn.Module):
         # Input processing
         x = patching(x, self.patch_size)
 
-        # TODO: Possible to fuse kernels?
+        # TODO: P2 Possible to fuse kernels?
         x = self.projection(x)
         x = torch.cat([x, self.cls_token])
         x = add(x, self.position_embeddings)

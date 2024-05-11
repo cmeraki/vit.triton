@@ -51,7 +51,7 @@ def transfer_pretrained_weights(model_id: str, custom_model: torch.nn.Module) ->
     # Mapping dictionary from source model to destination model
     weight_mapping = {
         'embeddings.position_embeddings': 'embeddings.position_embeddings',
-        # TODO: Fix mapping for projection layers
+        # TODO: P0 Fix mapping for projection layers - Need to write a conv2d kernel
         # 'embeddings.patch_embeddings.projection.weight': 'embeddings.projection.weight',
         # 'embeddings.patch_embeddings.projection.bias': 'embeddings.projection.bias'
     }
