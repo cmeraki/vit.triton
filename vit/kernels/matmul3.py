@@ -69,7 +69,7 @@ def matmul_kernel(
     offset_b = offset_k[:, None]*B_stride_height + offset_b[None, :]*B_stride_width  # dim * bx
     b = tl.load(B_ptr + offset_batch + offset_b, mask_b)
 
-    out = tl.dot(a, b)
+    out = tl.dot(a, b, allow_tf32=True)
 
     offset_out_batch = batch_idx * O_stride_batch
     offset_or = row_idx * bsy + tl.arange(0, bsy)

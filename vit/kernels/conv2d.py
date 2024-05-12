@@ -1,3 +1,4 @@
+import pdb
 import torch
 import triton
 import triton.language as tl
@@ -5,12 +6,22 @@ import triton.language as tl
 dtype = torch.float32
 device = 'cuda:0'
 
+
+@triton.autotune(
+    configs=[
+        triton.Config(num_warps=16),
+        triton.Config(num_warps=8),
+        triton.Config(num_warps=4)
+    ],
+    key=[],
+)
 @triton.jit
 def conv2d_kernel(
     input_ptr,
     input_batch_stride,
     input_channel_stride,
     input_row_stride,
+    input_col_stride,
     height,
     width,
     channels,
@@ -19,65 +30,67 @@ def conv2d_kernel(
     kernel_width,
     kernel_dim_stride,
     kernel_channel_stride,
+    kernel_row_stride,
+    kernel_col_stride,
     output_ptr,
+    output_width,
+    output_batch_stride,
     output_channel_stride,
     output_row_stride,
-    BLOCK_SIZE: tl.constexpr
+    output_col_stride,
+    BLOCK_SIZE_ROW: tl.constexpr,
+    BLOCK_SIZE_COL: tl.constexpr
 ):
-    """
-    for each out dim - 1st grid dim
-        for each elem output - 2nd grid dim
-            take 16x16x3 kernel
-            take input image with the same size
-            for every channel
-                do dot products
-    """
     batch_idx = tl.program_id(0)
     kernel_idx = tl.program_id(1)
     row_idx = tl.program_id(2)
 
+    # Input data offsets
     batch_offset = batch_idx*input_batch_stride
-    # Start of output for the output data
-    row_output_offset = row_idx*output_row_stride
 
-    # Start of read from the input data
-    row_offset = row_idx*kernel_height*input_row_stride
+    # Output data offsets
+    output_batch_offset = batch_idx*output_batch_stride
+    output_channel_offset = kernel_idx*output_channel_stride
+    output_row_offset = row_idx*output_row_stride
 
-    # The nth kernel
-    kernel_offset = kernel_idx*kernel_dim_stride
-    kernel_offset = kernel_offset + tl.arange(0, BLOCK_SIZE)
-    kernel_offset = kernel_offset[:, None] + kernel_offset[None, :]
+    # Kernel data offsets - nth kernel
+    kernel_row_offset = tl.arange(0, BLOCK_SIZE_ROW)
+    kernel_row_mask = kernel_row_offset[:, None] < kernel_height
+    kernel_row_offset = kernel_row_offset[:, None]*kernel_row_stride
+    kernel_col_offset = tl.arange(0, BLOCK_SIZE_COL)
+    kernel_col_mask = kernel_col_offset[None, :] < kernel_width
+    kernel_col_offset = kernel_col_offset[None, :]*kernel_col_stride
+    kernel_mask = kernel_row_mask & kernel_col_mask
 
-    # Index holding the pointer to the output element in the current row
-    output_col = 0
-    # Iterate over the input row in small batches
-    for offset in range(0, width, BLOCK_SIZE):
+    # Iterate over each column of the output
+    for col_idx in range(output_width):
         elem = 0.0
-        kernel_data = tl.load(kernel_ptr + kernel_offset)
+
+        # Input data base
+        input_row_offset = row_idx * kernel_height + tl.arange(0, BLOCK_SIZE_ROW)
+        input_row_mask = input_row_offset[:, None] < height
+        input_row_offset = input_row_offset[:, None]*input_row_stride
+
+        input_col_offset = col_idx * kernel_width + tl.arange(0, BLOCK_SIZE_ROW)
+        input_col_mask = input_col_offset[None, :] < width
+        input_col_offset = input_col_offset[None, :]*input_col_stride
+        input_mask = input_row_mask & input_col_mask
 
         # Iterate over the channels
         for c in range(channels):
-            local_row_offset = row_offset + tl.arange(0, BLOCK_SIZE)
-            local_col_offset = row_offset + offset + tl.arange(0, BLOCK_SIZE)
-            data_offset = local_row_offset[:, None] + local_col_offset[None, :]
-
-            local_row_mask = local_row_offset < height
-            local_col_mask = local_col_offset < width
-            data_mask = local_row_mask[:, None] & local_col_mask[None, :]
-
-            # Load input data for the current channel
-            channel_offset = c*input_channel_stride
-            input_data = tl.load(input_ptr + batch_offset + channel_offset + data_offset)
+            input_offset = input_ptr + batch_offset + c*input_channel_stride + input_row_offset + input_col_offset
+            input_data = tl.load(input_offset, input_mask) # BLOCK_SIZE_ROW x BLOCK_SIZE_COL
 
             # Load kernel weights for the current channel
-            kernel_channel_offset = c*kernel_channel_stride
-            kernel_data = tl.load(kernel_ptr + kernel_channel_offset + kernel_offset)
+            kernel_offset = kernel_ptr + kernel_idx*kernel_dim_stride + c*kernel_channel_stride + kernel_row_offset + kernel_col_offset
+            kernel_data = tl.load(kernel_offset, kernel_mask)
 
-            dot_prdct = tl.dot(input_data, kernel_data)
+            dot_prdct = input_data * kernel_data
             elem += tl.sum(dot_prdct)
 
-        tl.store(output_ptr + batch_offset + row_output_offset + output_col, elem)
-        output_col += 1
+        # Store to output for the current channel
+        output_offset = output_ptr + output_batch_offset + output_channel_offset + output_row_offset + col_idx
+        tl.store(output_offset, elem)
 
 
 def conv2d_triton(
@@ -86,17 +99,19 @@ def conv2d_triton(
 ) -> torch.Tensor:
     assert input.is_cuda and kernel.is_cuda, 'Input or kernel is not on GPU'
     assert len(input.shape) == 4, f'Input needs to be 4 dimensional, provided: {input.shape}'
-    assert len(kernel.shape) == 4, f'Kernel size needs to be 3 dimensional, provided: {kernel.shape}'
+    assert len(kernel.shape) == 4, f'Kernel size needs to be 4 dimensional, provided: {kernel.shape}'
 
     batch_size, channels, height, width = input.shape
     num_kernels, kernel_depth, kernel_height, kernel_width = kernel.shape
 
     assert height%kernel_height == 0 and width%kernel_width == 0, f"Input height and width should be divisible by the kernel height and width"
+    assert channels == kernel_depth, f"Kernel channel depth ({kernel_depth}) and input channel depth ({channels}) should be same"
 
-    output = torch.empty((batch_size, num_kernels, height//kernel_height, width//kernel_width))
+    output = torch.empty((batch_size, num_kernels, height//kernel_height, width//kernel_width)).to(device, dtype)
 
-    BLOCK_SIZE = 32
-    # Each kernel processes a single row of the output
+    BLOCK_SIZE_ROW = triton.next_power_of_2(kernel_height)
+    BLOCK_SIZE_COL = triton.next_power_of_2(kernel_width)
+    # Each kernel processes a single row of the output matrix
     grid = (batch_size, num_kernels, height//kernel_height)
 
     conv2d_kernel[grid](
@@ -104,6 +119,7 @@ def conv2d_triton(
         input_batch_stride=input.stride(0),
         input_channel_stride=input.stride(1),
         input_row_stride=input.stride(2),
+        input_col_stride=input.stride(3),
         height=height,
         width=width,
         channels=channels,
@@ -112,26 +128,33 @@ def conv2d_triton(
         kernel_width=kernel_width,
         kernel_dim_stride=kernel.stride(0),
         kernel_channel_stride=kernel.stride(1),
+        kernel_row_stride=kernel.stride(2),
+        kernel_col_stride=kernel.stride(3),
         output_ptr=output,
+        output_width=width//kernel_width,
+        output_batch_stride=output.stride(0),
         output_channel_stride=output.stride(1),
         output_row_stride=output.stride(2),
-        BLOCK_SIZE=BLOCK_SIZE
+        output_col_stride=output.stride(3),
+        BLOCK_SIZE_ROW=BLOCK_SIZE_ROW,
+        BLOCK_SIZE_COL=BLOCK_SIZE_COL,
     )
+
+    return output
 
 if __name__ == '__main__':
 
     batch_size=1
-    height=16
-    width=16
+    height=32
+    width=32
     channels=3
 
-    kernels=5
-    kernel_height=8
-    kernel_width=8
+    kernels=4
+    kernel_height=16
+    kernel_width=16
 
-
-    input = torch.randint(0, 5, (batch_size, channels, height, width), dtype=dtype, device=device)
-    kernel = torch.randint(0, 5, (kernels, channels, kernel_height, kernel_width), dtype=dtype, device=device)
+    input = torch.randint(0, 10, (batch_size, channels, height, width)).to(device, dtype)
+    kernel = torch.randint(0, 10, (kernels, channels, kernel_height, kernel_width)).to(device, dtype)
 
     conv_layer = torch.nn.Conv2d(
         in_channels=channels,
@@ -150,8 +173,8 @@ if __name__ == '__main__':
     y_triton = conv2d_triton(input, kernel)
 
     print(f'Original matrix:\n{input}')
-    print(f'PyTorch patching:\n{y_torch}')
-    print(f'Triton patching:\n{y_triton}')
+    print(f'PyTorch Conv2d:\n{y_torch}')
+    print(f'Triton Conv2d:\n{y_triton}')
 
     if torch.allclose(y_torch, y_triton):
         print('Data matches')
@@ -159,10 +182,9 @@ if __name__ == '__main__':
     else:
         print('Data does not match')
 
-    """
     @triton.testing.perf_report(
         triton.testing.Benchmark(
-            x_names=['N'],  # argument names to use as an x-axis for the plot
+            x_names=['kernels'],  # argument names to use as an x-axis for the plot
             # different possible values for `x_name`
             x_vals=[128*i for i in range(2, 15)],
             # argument name whose value corresponds to a different line in the plot
@@ -178,22 +200,39 @@ if __name__ == '__main__':
             styles=[('blue', '-'), ('green', '-')],
             ylabel="GB/s",
             plot_name="Performance",
-            args={'B': 4, 'D': 768},  # values for function arguments not in `x_names` and `y_name`
+            args={'batch_size': 4},  # values for function arguments not in `x_names` and `y_name`
         ))
-    def benchmark(B, N, D, provider):
-        x = torch.randn(B, N, D, device='cuda', dtype=torch.float32)
-        y = torch.randn(B, N, D, device='cuda', dtype=torch.float32)
+    def benchmark(batch_size, kernels, provider):
+        height = 224
+        width = 224
+        channels = 3
+        kernel_height = 16
+        kernel_width = 16
+
+        input = torch.randint(0, 5, (batch_size, channels, height, width)).to(device, dtype)
+        kernel = torch.randint(0, 5, (kernels, channels, kernel_height, kernel_width)).to(device, dtype)
+
+        conv_layer = torch.nn.Conv2d(
+            in_channels=channels,
+            out_channels=kernels,
+            kernel_size=(kernel_height, kernel_width),
+            stride=(kernel_height, kernel_width),
+            bias=False,
+            dtype=dtype
+        ).to(device)
+
+        # For a fair comparison, copying same kernel to torch layer as well
+        with torch.no_grad():
+            conv_layer.weight.copy_(kernel)
 
         quantiles = [0.5, 0.2, 0.8]
 
         if provider == 'triton':
-            ms, min_ms, max_ms = triton.testing.do_bench(
-                lambda: conv2d_kernel(x, y), quantiles=quantiles)
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: conv2d_triton(input, kernel), quantiles=quantiles)
         if provider == 'torch':
-            ms, min_ms, max_ms = triton.testing.do_bench(
-                lambda: torch.add(x, y), quantiles=quantiles)
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: conv_layer(input), quantiles=quantiles)
 
-        def gbps(ms): return 2 * (x.nelement() + y.nelement()) * x.element_size() * 1e-9 / (ms * 1e-3)
+        def gbps(ms): return 2 * (input.nelement()) * input.element_size() * 1e-9 / (ms * 1e-3)
 
         return gbps(ms), gbps(max_ms), gbps(min_ms)
 
@@ -202,4 +241,3 @@ if __name__ == '__main__':
         show_plots=True,
         print_data=True
     )
-    """

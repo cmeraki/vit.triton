@@ -2,8 +2,6 @@ import torch
 import triton
 import triton.language as tl
 
-from vit.utils import tensor_info
-
 device = 'cuda:0'
 
 @triton.autotune(
@@ -70,7 +68,7 @@ def matmul_kernel(
         mask_b = (offset_k[:, None] < K) & (mask_b[None, :] < N)
         b = tl.load(B_ptr + offset_b, mask_b)
 
-        o = tl.dot(a, b) # bsy, bsx
+        o = tl.dot(a, b, allow_tf32=True) # bsy, bsx
         output += o
 
     offset_batch_out = batch_idx * O_stride_batch
@@ -81,7 +79,7 @@ def matmul_kernel(
 
     tl.store(O_ptr + offset_batch_out + offset_o, output, mask_o)
 
-@tensor_info('matmul')
+
 def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     """
     Implements matrix multiplication between input matrix A and B
@@ -120,7 +118,7 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
 
 if __name__ == '__main__':
     '''
-    python matmul.py -M 512 -N 512 -K 512
+    python matmul.py -B 512 -M 512 -N 512 -K 512
     '''
     from argparse import ArgumentParser
     parser = ArgumentParser()
