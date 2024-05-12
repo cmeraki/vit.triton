@@ -45,7 +45,7 @@ def map_attn_layers(source_layer_num: str, source_proj: str, source_type: str, s
 
 def map_non_attn_layers(source_state_dict: OrderedDict, dest_state_dict: OrderedDict, weight_mapping: Dict) -> Dict:
     """
-    Map non attention layers (feed forward, layernorm etc.)
+    Map non attention layers (patching, feed forward, layernorm etc.)
     In MLP layer, weights are transferred after applying a transpose just due to the convention of how HF stores the weight
     and how I decide to store the weights.
     """

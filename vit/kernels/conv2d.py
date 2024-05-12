@@ -2,6 +2,7 @@ import pdb
 import torch
 import triton
 import triton.language as tl
+from typing import Tuple
 
 dtype = torch.float32
 device = 'cuda:0'
@@ -9,9 +10,9 @@ device = 'cuda:0'
 
 @triton.autotune(
     configs=[
-        triton.Config(num_warps=16),
-        triton.Config(num_warps=8),
-        triton.Config(num_warps=4)
+        triton.Config({}, num_warps=16),
+        triton.Config({}, num_warps=8),
+        triton.Config({}, num_warps=4)
     ],
     key=[],
 )
@@ -32,6 +33,7 @@ def conv2d_kernel(
     kernel_channel_stride,
     kernel_row_stride,
     kernel_col_stride,
+    bias_ptr,
     output_ptr,
     output_width,
     output_batch_stride,
@@ -44,6 +46,10 @@ def conv2d_kernel(
     batch_idx = tl.program_id(0)
     kernel_idx = tl.program_id(1)
     row_idx = tl.program_id(2)
+
+    # Bias offset and data
+    bias_offset = kernel_idx
+    bias = tl.load(bias_ptr + bias_offset)
 
     # Input data offsets
     batch_offset = batch_idx*input_batch_stride
@@ -90,16 +96,18 @@ def conv2d_kernel(
 
         # Store to output for the current channel
         output_offset = output_ptr + output_batch_offset + output_channel_offset + output_row_offset + col_idx
-        tl.store(output_offset, elem)
+        tl.store(output_offset, elem + bias)
 
 
 def conv2d_triton(
     input: torch.Tensor,
-    kernel: torch.Tensor
+    kernel: torch.Tensor,
+    bias: torch.Tensor
 ) -> torch.Tensor:
     assert input.is_cuda and kernel.is_cuda, 'Input or kernel is not on GPU'
     assert len(input.shape) == 4, f'Input needs to be 4 dimensional, provided: {input.shape}'
     assert len(kernel.shape) == 4, f'Kernel size needs to be 4 dimensional, provided: {kernel.shape}'
+    assert bias.shape[0] == kernel.shape[0], f'Bias dimension should be same as the kernel 1st dimension'
 
     batch_size, channels, height, width = input.shape
     num_kernels, kernel_depth, kernel_height, kernel_width = kernel.shape
@@ -130,6 +138,7 @@ def conv2d_triton(
         kernel_channel_stride=kernel.stride(1),
         kernel_row_stride=kernel.stride(2),
         kernel_col_stride=kernel.stride(3),
+        bias_ptr=bias,
         output_ptr=output,
         output_width=width//kernel_width,
         output_batch_stride=output.stride(0),
@@ -142,35 +151,55 @@ def conv2d_triton(
 
     return output
 
+
+class Conv2DTriton(torch.nn.Module):
+    def __init__(self, in_channels:int, out_channels: int, kernel_size: Tuple):
+        super().__init__()
+
+        assert type(kernel_size) == tuple and len(kernel_size) == 2, f'Param kernel size should be a tuple of size 2'
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+
+        self.weight = torch.nn.Parameter(torch.zeros(self.out_channels, self.in_channels, self.kernel_size[0], self.kernel_size[1]))
+        self.bias = torch.nn.Parameter(torch.zeros(self.out_channels))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return conv2d_triton(x, self.weight, self.bias)
+
+
 if __name__ == '__main__':
 
-    batch_size=1
-    height=32
-    width=32
+    batch_size=4
+    height=224
+    width=224
     channels=3
 
-    kernels=4
+    kernels=512
     kernel_height=16
     kernel_width=16
 
     input = torch.randint(0, 10, (batch_size, channels, height, width)).to(device, dtype)
     kernel = torch.randint(0, 10, (kernels, channels, kernel_height, kernel_width)).to(device, dtype)
+    bias = torch.randn(kernels).to(device, dtype)
 
     conv_layer = torch.nn.Conv2d(
         in_channels=channels,
         out_channels=kernels,
         kernel_size=(kernel_height, kernel_width),
         stride=(kernel_height, kernel_width),
-        bias=False,
+        bias=True,
         dtype=dtype
     ).to(device)
 
     # For a fair comparison, copying same kernel to torch layer as well
     with torch.no_grad():
         conv_layer.weight.copy_(kernel)
+        conv_layer.bias.copy_(bias)
 
     y_torch = conv_layer(input)
-    y_triton = conv2d_triton(input, kernel)
+    y_triton = conv2d_triton(input, kernel, bias)
 
     print(f'Original matrix:\n{input}')
     print(f'PyTorch Conv2d:\n{y_torch}')
@@ -211,24 +240,26 @@ if __name__ == '__main__':
 
         input = torch.randint(0, 5, (batch_size, channels, height, width)).to(device, dtype)
         kernel = torch.randint(0, 5, (kernels, channels, kernel_height, kernel_width)).to(device, dtype)
+        bias = torch.randn(kernels).to(device, dtype)
 
         conv_layer = torch.nn.Conv2d(
             in_channels=channels,
             out_channels=kernels,
             kernel_size=(kernel_height, kernel_width),
             stride=(kernel_height, kernel_width),
-            bias=False,
+            bias=True,
             dtype=dtype
         ).to(device)
 
         # For a fair comparison, copying same kernel to torch layer as well
         with torch.no_grad():
             conv_layer.weight.copy_(kernel)
-
+            conv_layer.bias.copy_(bias)
+        
         quantiles = [0.5, 0.2, 0.8]
 
         if provider == 'triton':
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: conv2d_triton(input, kernel), quantiles=quantiles)
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: conv2d_triton(input, kernel, bias), quantiles=quantiles)
         if provider == 'torch':
             ms, min_ms, max_ms = triton.testing.do_bench(lambda: conv_layer(input), quantiles=quantiles)
 

@@ -50,12 +50,12 @@ def transfer_pretrained_weights(model_id: str, custom_model: torch.nn.Module) ->
 
     # Mapping dictionary from source model to destination model
     weight_mapping = {
+        'embeddings.cls_token': 'embeddings.cls_token',
         'embeddings.position_embeddings': 'embeddings.position_embeddings',
-        # TODO: P0 Fix mapping for projection layers - Need to write a conv2d kernel
-        # 'embeddings.patch_embeddings.projection.weight': 'embeddings.projection.weight',
-        # 'embeddings.patch_embeddings.projection.bias': 'embeddings.projection.bias'
+        'embeddings.patch_embeddings.projection.weight': 'embeddings.projection.weight',
+        'embeddings.patch_embeddings.projection.bias': 'embeddings.projection.bias'
     }
-
+   
     # Adding mappings for each encoder layer's output and intermediate dense layers
     for i in range(num_layers):
         weight_mapping.update({
@@ -91,5 +91,13 @@ def transfer_pretrained_weights(model_id: str, custom_model: torch.nn.Module) ->
     )
 
     custom_model.load_state_dict(custom_state_dict, strict=False)
+
+    custom_state_dict = custom_model.state_dict()
+    uninitialized_layers = []
+    for k, v in custom_state_dict.items():
+        if torch.all(v == 0):
+            uninitialized_layers.append(k)
+
+    assert len(uninitialized_layers) == 0, f"Some layer are not initialized: {uninitialized_layers}"
 
     return custom_model

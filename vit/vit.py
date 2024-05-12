@@ -10,6 +10,7 @@ from .kernels import (
     add,
     matmul3,
     LayerNormTriton,
+    Conv2DTriton
 )
 
 from loguru import logger
@@ -157,6 +158,7 @@ class Transformer(nn.Module):
 
         return out
 
+
 class Encoder(nn.Module):
     def __init__(self, num_layers:int, num_heads: int, hidden_dim: int, d_out: int):
         super().__init__()
@@ -182,24 +184,32 @@ class Embeddings(nn.Module):
     def __init__(self, patch_size, num_patches, patch_dim, hidden_dim):
         super().__init__()
 
-
         self.patch_size = patch_size
 
-        self.cls_token = torch.Tensor((1, 1, hidden_dim))
+        self.cls_token = nn.Parameter(torch.zeros((1, 1, hidden_dim)))
         self.position_embeddings = nn.Parameter(torch.zeros(1, num_patches+1, hidden_dim))
-        self.projection = LinearWithBias(patch_dim, hidden_dim)
+        self.projection = Conv2DTriton(
+            in_channels=3,
+            out_channels=patch_dim,
+            kernel_size=(self.patch_size, self.patch_size)
+        )
 
     @tensor_info('embedding')
     def forward(self, x) -> torch.Tensor:
         # Input processing
-        x = patching(x, self.patch_size)
+        # TODO: Unravel last 2 dim in triton
+        x = self.projection(x) 
+        x = x.view(*x.shape[:-2], -1)
+        x = x.permute(0, 2, 1).contiguous()
+
+        print(x.shape, self.cls_token.shape)
 
         # TODO: P2 Possible to fuse kernels?
-        x = self.projection(x)
         x = torch.cat([x, self.cls_token])
         x = add(x, self.position_embeddings)
 
         return x
+
 
 class VIT(nn.Module):
     def __init__(
