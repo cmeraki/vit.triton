@@ -205,7 +205,7 @@ class Embeddings(nn.Module):
         print(x.shape, self.cls_token.shape)
 
         # TODO: P2 Possible to fuse kernels?
-        x = torch.cat([x, self.cls_token])
+        x = torch.cat([x, self.cls_token], 1)
         x = add(x, self.position_embeddings)
 
         return x
