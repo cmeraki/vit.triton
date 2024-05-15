@@ -8,14 +8,6 @@ logger.remove()
 logger.add(sys.stdout, format="[{time: YYYY-MM-DD HH:mm:ss} {level}] {message}", level="INFO")
 
 
-def load_pretrained_model(model_id: str, device: str = 'cuda:0', dtype: torch.dtype=torch.float32) -> OrderedDict:
-    pretrained_model = ViTModel.from_pretrained(model_id)
-    pretrained_model.to(device, dtype)
-
-    pretrained_state_dict = pretrained_model.state_dict()
-
-    return pretrained_state_dict
-
 def map_attn_layers(source_layer_num: str, source_proj: str, source_type: str, source_tensor: torch.Tensor, dest_state_dict: OrderedDict) -> Dict:
     """
     Maps query, key and value weight matrices from pretrained model to custom model.
@@ -33,11 +25,12 @@ def map_attn_layers(source_layer_num: str, source_proj: str, source_type: str, s
             num_head = int(layer.split('.')[5])
 
             if type == 'weight':
-                src = source_tensor[:, num_head*64:(num_head+1)*64]
+                src = source_tensor.T.contiguous()
+                src = src[:, num_head*64:(num_head+1)*64]
             else:
                 src = source_tensor[num_head*64:(num_head+1)*64]
 
-            logger.info(f'Mapping to destination\tLayer: {layer}\tSource tensor shape: {src.shape}\tDestination tensor shape: {weight.shape}')
+            logger.debug(f'Mapping to destination\tLayer: {layer}\tSource tensor shape: {src.shape}\tDestination tensor shape: {weight.shape}')
 
             dest_state_dict[layer] = src.clone()
 
@@ -53,10 +46,10 @@ def map_non_attn_layers(source_state_dict: OrderedDict, dest_state_dict: Ordered
     for key, value in source_state_dict.items():
         mapped_key = weight_mapping.get(key)
         if mapped_key and mapped_key in dest_state_dict:
-            logger.info(f"Transferring weight from {key} to {mapped_key}")
+            logger.debug(f"Transferring weight from {key} to {mapped_key}")
 
-            if 'attention' not in mapped_key and ('output' in mapped_key or 'intermediate' in mapped_key):
-                logger.info(f"Tranferring transpose weights")
+            if ('output' in mapped_key or 'intermediate' in mapped_key):
+                logger.debug(f"Tranferring transpose weights")
                 dest_state_dict[mapped_key] = value.t().clone()
                 continue
 
@@ -64,7 +57,7 @@ def map_non_attn_layers(source_state_dict: OrderedDict, dest_state_dict: Ordered
             continue
 
         else:
-            logger.info(f'Not transferring weight for: {key}')
+            logger.debug(f'Not transferring weight for: {key}')
 
     return dest_state_dict
 

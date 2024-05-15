@@ -2,8 +2,6 @@ import torch
 import triton
 import triton.language as tl
 
-from vit.utils import tensor_info
-
 dtype = torch.float32
 device = 'cuda:0'
 
@@ -26,6 +24,7 @@ def softmax_kernel(
 
     mask = tl.arange(0, BLOCK_SIZE) < num_cols
     data = tl.load(input_ptr + batch_offset + row_offset, mask, other=-float('inf'))
+    data = data - tl.max(data, axis=0)
 
     row_wise_exp = tl.exp(data)
     row_wise_sum = tl.sum(row_wise_exp, axis=0)
@@ -34,7 +33,6 @@ def softmax_kernel(
     tl.store(output_ptr + batch_offset + row_offset, output, mask=mask)
 
 
-@tensor_info('softmax')
 def softmax_triton(A: torch.Tensor) -> torch.Tensor:
     """
     Performs softmax on input. This function always performs softmax on the last axis

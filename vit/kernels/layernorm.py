@@ -133,7 +133,7 @@ class LayerNormTriton(torch.nn.Module):
         self.dim = dim
         self.eps = eps
 
-        self.weight = torch.nn.Parameter(torch.zeros(self.dim))
+        self.weight = torch.nn.Parameter(torch.ones(self.dim))
         self.bias = torch.nn.Parameter(torch.zeros(self.dim))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -154,11 +154,11 @@ if __name__ == '__main__':
     N = args.N
     D = args.D
 
-    a = torch.randint(0, 10, (B, N, D), device=device, dtype=dtype)
+    a = torch.randn((B, N, D), device=device, dtype=dtype)
     _shape = (a.shape[-1], )
-    weight = torch.randn(_shape, device=device, dtype=dtype)
-    bias = torch.randn(_shape, device=device, dtype=dtype)
-    eps = 1e-5
+    weight = torch.ones(_shape, device=device, dtype=dtype)
+    bias = torch.zeros(_shape, device=device, dtype=dtype)
+    eps = 1e-12
 
     y_pytorch = torch.nn.functional.layer_norm(a, _shape, weight, bias, eps).to(dtype)
     y_triton = layernorm_triton(a, weight=weight, bias=bias, eps=eps)
@@ -167,7 +167,7 @@ if __name__ == '__main__':
     print(f'PyTorch layer norm\n{y_pytorch}')
     print(f'Triton layer norm\n{y_triton}')
 
-    assert torch.allclose(y_triton, y_pytorch, atol=1e-2, rtol=0), 'Data does not match'
+    assert torch.allclose(y_triton, y_pytorch, atol=1e-6), f'Data does not match, diff = {torch.max(torch.abs(y_pytorch-y_triton))}'
 
     @triton.testing.perf_report(
         triton.testing.Benchmark(

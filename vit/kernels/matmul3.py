@@ -30,6 +30,7 @@ def matmul_kernel(
     A_stride_batch,
     A_stride_height,
     A_stride_width,
+    B_stride_batch,
     B_stride_height,
     B_stride_width,
     O_stride_batch,
@@ -55,7 +56,8 @@ def matmul_kernel(
     col_idx = tl.program_id(axis=2)
 
     # Batch offset for A and B will be the same
-    offset_batch = batch_idx * A_stride_batch
+    a_offset_batch = batch_idx * A_stride_batch
+    b_offset_batch = batch_idx * B_stride_batch
     output = tl.zeros((bsy, bsx), dtype=tl.float32)
 
     for offset in range(0, dim, bsk):
@@ -65,13 +67,13 @@ def matmul_kernel(
         offset_a = row_idx * bsy + tl.arange(0, bsy)
         mask_a = (offset_a[:, None] < seq_len) & (offset_k[None, :] < dim)
         offset_a = offset_a[:, None]*A_stride_height + offset_k[None, :]*A_stride_width  # by * bk
-        a = tl.load(A_ptr + offset_batch + offset_a, mask_a)
+        a = tl.load(A_ptr + a_offset_batch + offset_a, mask_a)
 
         # Read offset from B_ptr
         offset_b = col_idx * bsx + tl.arange(0, bsx)
-        mask_b = (offset_k[:, None] < dim) & (offset_b[None, :] < seq_len)
+        mask_b = (offset_k[:, None] < dim) & (offset_b[None, :] < dim_out)
         offset_b = offset_k[:, None]*B_stride_height + offset_b[None, :]*B_stride_width  # bk * bx
-        b = tl.load(B_ptr + offset_batch + offset_b, mask_b)
+        b = tl.load(B_ptr + b_offset_batch + offset_b, mask_b)
 
         out = tl.dot(a, b, allow_tf32=True) # by, bx
         output += out
@@ -90,11 +92,11 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     Implements matrix multiplication between input matrix A and B
     
     Args:
-        - A {torch.Tensor}: Input matrix with shape (B, T, Cin) where B is the batch size, T is the sequence length, Cin is the input dimension
-        - B {torch.Tensor}: Weight matrix with shape (B, Cin, Cout) where Cout is the hidden dimension
+        - A {torch.Tensor}: Input matrix with shape (batch_size, seq_len, dim) where B is the batch size, T is the sequence length, Cin is the input dimension
+        - B {torch.Tensor}: Weight matrix with shape (batch_size, dim, dim_out) where Cout is the hidden dimension
 
     Returns:
-        - {torch.Tensor}: Output tensor with (B, T, Cout)
+        - {torch.Tensor}: Output tensor with (batch_size, seq_len, dim_out)
     """
     assert len(A.shape) == 3, "First input matrix needs to have 3 dimensions (B, T, C)"
     assert len(A.shape) == len(B.shape), "Both matrix should be 3 dimensional"
@@ -115,6 +117,7 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
         A_stride_batch=A.stride(0),
         A_stride_height=A.stride(1),
         A_stride_width=A.stride(2),
+        B_stride_batch=B.stride(0),
         B_stride_height=B.stride(1),
         B_stride_width=B.stride(2),
         O_stride_batch=O.stride(0),

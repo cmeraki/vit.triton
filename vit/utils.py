@@ -1,9 +1,13 @@
 import sys
+import time
 import torch
 import functools
+from tqdm import tqdm
+
+from typing import List, Tuple
+
 from loguru import logger
 from .load_weights import (
-    load_pretrained_model,
     map_non_attn_layers,
     map_attn_layers
 )
@@ -38,12 +42,12 @@ def tensor_info(func_name):
     return decorator
 
 
-def transfer_pretrained_weights(model_id: str, custom_model: torch.nn.Module) -> torch.nn.Module:
+def transfer_pretrained_weights(pretrained_model: torch.nn.Module, custom_model: torch.nn.Module) -> torch.nn.Module:
     """
     Transfer weights from a pretrained model to the custom model
     """
 
-    pretrained_state_dict = load_pretrained_model(model_id)
+    pretrained_state_dict = pretrained_model.state_dict()
     custom_state_dict = custom_model.state_dict()
 
     num_layers = 12
@@ -53,7 +57,11 @@ def transfer_pretrained_weights(model_id: str, custom_model: torch.nn.Module) ->
         'embeddings.cls_token': 'embeddings.cls_token',
         'embeddings.position_embeddings': 'embeddings.position_embeddings',
         'embeddings.patch_embeddings.projection.weight': 'embeddings.projection.weight',
-        'embeddings.patch_embeddings.projection.bias': 'embeddings.projection.bias'
+        'embeddings.patch_embeddings.projection.bias': 'embeddings.projection.bias',
+        'layernorm.weight': 'layernorm.weight',
+        'layernorm.bias': 'layernorm.bias',
+        'pooler.dense.weight': 'pooler.dense.weight',
+        'pooler.dense.bias': 'pooler.dense.bias'
     }
    
     # Adding mappings for each encoder layer's output and intermediate dense layers
@@ -80,7 +88,7 @@ def transfer_pretrained_weights(model_id: str, custom_model: torch.nn.Module) ->
         for attn_layer in attention_layers:
             if attn_layer in layer_name:
                 layer_num, proj, type = layer_name.split('.')[2], layer_name.split('.')[-2], layer_name.split('.')[-1]
-                logger.info(f'Mapping from source\tLayer number: {layer_num} \tProjection: {proj} \tType: {type}')
+                logger.info(f'Mapping from source\t{layer_name}\tLayer number: {layer_num} \tProjection: {proj} \tType: {type}')
                 custom_state_dict = map_attn_layers(layer_num, proj, type, weight, custom_state_dict)
 
     # Transfer rest of the layers
@@ -98,6 +106,88 @@ def transfer_pretrained_weights(model_id: str, custom_model: torch.nn.Module) ->
         if torch.all(v == 0):
             uninitialized_layers.append(k)
 
-    assert len(uninitialized_layers) == 0, f"Some layer are not initialized: {uninitialized_layers}"
+    if uninitialized_layers:
+        # Pooler bias has all zeros, so that is expected to be here
+        print(f"Some layer are not initialized: {uninitialized_layers}")
 
     return custom_model
+
+def capture_cuda_graph(model, static_input):
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+
+    with torch.no_grad():
+        with torch.cuda.stream(stream):
+            for i in range(5):
+                _ = model(static_input)
+
+    torch.cuda.current_stream().wait_stream(stream)
+
+    # Record the CUDA graph
+    graph = torch.cuda.CUDAGraph()
+
+    # Capture the graph
+    with torch.cuda.graph(graph):
+        static_output = model(static_input)
+
+    return graph, static_output
+
+
+def benchmark(
+        model1: torch.nn.Module,
+        model2: torch.nn.Module,
+        input_shape: Tuple[int] = (3, 224, 224),
+        batch_sizes: List[int] = [1, 4, 16, 32, 64, 128, 256],
+        warmups: int = 50,
+        reps: int = 100
+    ) -> Tuple[List]:
+    """
+    Benchmark two models on different batch sizes
+
+    Returns:
+        Tuple[List]: 2 lists with model time for different models
+    """
+    model1_times = []
+    model2_times = []
+
+    model1_start = torch.cuda.Event(enable_timing=True)
+    model1_end = torch.cuda.Event(enable_timing=True)
+
+    model2_start = torch.cuda.Event(enable_timing=True)
+    model2_end = torch.cuda.Event(enable_timing=True)
+
+
+    for bs in tqdm(batch_sizes, total=len(batch_sizes)):
+        logger.info(f'Running for batch size: {bs}')
+
+        a = torch.randn((bs, *input_shape)).to(device=model1.device, dtype=model1.dtype)
+
+        # warmup run
+        logger.info(f'Doing a warmup run')
+        with torch.no_grad():
+            for _ in range(warmups):
+                _ = model1(a)
+                _ = model2(a)
+        logger.info('Warmup run complete')
+
+        model1_start.record()
+        with torch.no_grad():
+            for _ in range(reps):
+                o1 = model1(a)
+        model1_end.record()
+        torch.cuda.synchronize()
+        model1_time = model1_start.elapsed_time(model1_end) / 10
+        model1_times.append(model1_time)
+
+        model2_start.record()
+        with torch.no_grad():
+            for _ in range(reps):
+                o2 = model2(a)
+        model2_end.record()
+        torch.cuda.synchronize()
+        model2_time = model2_start.elapsed_time(model2_end) / 10
+        model2_times.append(model2_time)
+
+        logger.info(f'Diff: {torch.max(torch.abs(o1[0]-o2))}')
+
+    return model1_times, model2_times

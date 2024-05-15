@@ -2,9 +2,8 @@ import math
 import torch
 from torch import nn
 
-from .utils import tensor_info, transfer_pretrained_weights
+from .utils import tensor_info, transfer_pretrained_weights, benchmark
 from .kernels import (
-    patching,
     matmul,
     softmax,
     add,
@@ -12,8 +11,6 @@ from .kernels import (
     LayerNormTriton,
     Conv2DTriton
 )
-
-from loguru import logger
 
 device = 'cuda:0'
 dtype = torch.float32
@@ -28,7 +25,7 @@ class LinearWithBias(nn.Module):
         self.weight = nn.Parameter(torch.zeros(input_dim, output_dim))
         self.bias = nn.Parameter(torch.zeros(output_dim))
 
-    @tensor_info('linear')
+    ##@tensor_info('linear')
     def forward(self, x) -> torch.Tensor:
         x = matmul(x, self.weight)
         # TODO: P1 Handle broadcast addition
@@ -53,7 +50,7 @@ class SelfAttention(nn.Module):
         self.key = LinearWithBias(self.d_in, self.d_out)
         self.value = LinearWithBias(self.d_in, self.d_out)
 
-    @tensor_info('self-attn')
+    #@tensor_info('self-attn')
     def forward(self, x: torch.Tensor) -> torch.Tensor:
 
         # All three are B x N x d_out
@@ -97,7 +94,7 @@ class MultiHeadAttention(nn.Module):
         self.attention = nn.ModuleList([SelfAttention(d_in=d_in, d_out=d_out) for _ in range(self.num_heads)])
         self.output = LinearWithBias(self.d_in, self.d_in)
 
-    @tensor_info('mha')
+    #@tensor_info('mha')
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         outputs = []
         for attn in self.attention:
@@ -109,6 +106,8 @@ class MultiHeadAttention(nn.Module):
             )
 
         # B x N x d_in
+        # TODO: P1 Torch cat is bad - can slow down the overall execution
+        # consider preallocated tensors
         out = torch.cat(
             outputs,
             dim=-1
@@ -131,30 +130,32 @@ class Transformer(nn.Module):
         self.d_in = d_in
         self.d_out = d_out
 
+        self.layernorm_before = LayerNormTriton(self.d_in, eps=1e-12)
         self.attention = MultiHeadAttention(self.num_heads, self.d_in, self.d_out)
         self.intermediate = LinearWithBias(self.d_in, 4*self.d_in)
         self.output = LinearWithBias(4*self.d_in, self.d_in)
-
-        self.layernorm_before = LayerNormTriton(self.d_in, eps=1e-12)
         self.layernorm_after = LayerNormTriton(self.d_in, eps=1e-12)
 
-    @tensor_info('transformer')
+    #@tensor_info('transformer')
     def forward(self, x):
         # B x N x D_out
-        attn = self.attention(x)
+        attn = self.attention(
+            self.layernorm_before(x)
+        )
 
-        # Skip connection
-        res = add(attn, x)
-        res = self.layernorm_before(res)
+        # First residual connection
+        res = attn + x
+        # res = add(attn, x)
 
-        # B x N x 4D_out
-        out = self.intermediate(res)
-        # B x N x D_out
+        out = self.layernorm_after(res)
+        out = self.intermediate(out)
+        # P0: Replace with triton implementation
+        out = nn.functional.gelu(out)
         out = self.output(out)
 
         # Skip connection
-        out = add(out, res)
-        out = self.layernorm_after(out)
+        # out = add(out, res)
+        out = out + res
 
         return out
 
@@ -172,7 +173,7 @@ class Encoder(nn.Module):
             Transformer(num_heads=self.num_heads, d_in=self.hidden_dim, d_out=d_out) for _ in range(self.num_layers)
         )
 
-    @tensor_info('encoder')
+    #@tensor_info('encoder')
     def forward(self, x) -> torch.Tensor:
         for layer in self.layer:
             x = layer(x)
@@ -194,21 +195,21 @@ class Embeddings(nn.Module):
             kernel_size=(self.patch_size, self.patch_size)
         )
 
-    @tensor_info('embedding')
+    #@tensor_info('embedding')
     def forward(self, x) -> torch.Tensor:
         # Input processing
-        # TODO: Unravel last 2 dim in triton
-        x = self.projection(x) 
-        x = x.view(*x.shape[:-2], -1)
-        x = x.permute(0, 2, 1).contiguous()
+        x = self.projection(x)
+        # See: https://github.com/huggingface/transformers/blob/main/src/transformers/models/vit/modeling_vit.py#L175
+        x = x.flatten(2).transpose(1, 2)
 
-        print(x.shape, self.cls_token.shape)
+        batch_size = x.shape[0]
+        cls_token = self.cls_token.expand(batch_size, -1, -1)
 
         # TODO: P2 Possible to fuse kernels?
-        x = torch.cat([x, self.cls_token], 1)
-        x = add(x, self.position_embeddings)
+        x = torch.cat([cls_token, x], 1)
 
-        return x
+        # return add(x, self.position_embeddings)
+        return torch.add(x, self.position_embeddings)
 
 
 class VIT(nn.Module):
@@ -246,14 +247,14 @@ class VIT(nn.Module):
         # Layers initialization
         self.embeddings = Embeddings(patch_size=self.patch_size, num_patches=num_patches, patch_dim=patch_dim, hidden_dim=self.hidden_dim)
         self.encoder = Encoder(num_layers=self.num_layers, num_heads=self.num_heads, hidden_dim=self.hidden_dim, d_out=d_out)
-
+        self.layernorm = LayerNormTriton(dim=self.hidden_dim, eps=1e-12)
 
     def forward(self, x):
-        print(f'Image shape provided: {x.shape}')
         assert x.shape[1:] == (3, self.height, self.width), f"Image size {x.shape[1:]} not matching with the model input size: {3, self.height, self.width}"
 
         x = self.embeddings(x)
         x = self.encoder(x)
+        x = self.layernorm(x)
 
         return x
 
@@ -263,30 +264,47 @@ if __name__ == '__main__':
     import requests
     import numpy as np
 
-    height, width = 224, 224
+    from transformers import ViTConfig, ViTModel
+
+    model_id = 'google/vit-base-patch16-224'
+    vit_config = ViTConfig(model_id)
+
+    height, width, channels = vit_config.image_size, vit_config.image_size, vit_config.num_channels
+    patch_size = vit_config.patch_size
+    hidden_dim = 768
+    num_heads = vit_config.num_attention_heads
+    num_layers = vit_config.num_hidden_layers
 
     model = VIT(
         height=height,
         width=width,
-        channels=3,
-        patch_size=16,
-        hidden_dim=768,
-        num_heads=12,
-        num_layers=12
+        channels=channels,
+        patch_size=patch_size,
+        hidden_dim=hidden_dim,
+        num_heads=num_heads,
+        num_layers=num_layers
     )
     model.to(device, dtype)
 
+    pretrained_model = ViTModel.from_pretrained(model_id, add_pooling_layer=False)
+    pretrained_model.to(device, dtype)
+    pretrained_model.eval()
+
     model = transfer_pretrained_weights(
-        model_id='google/vit-base-patch16-224',
+        pretrained_model=pretrained_model,
         custom_model=model
     )
-
 
     url = 'http://images.cocodataset.org/val2017/000000039769.jpg'
     image = Image.open(requests.get(url, stream=True).raw)
     image = image.resize((height, width))
     image = torch.Tensor(np.array(image)).to(device=device, dtype=dtype)
+    image = image[None, :].permute(0, 3, 1, 2)
 
     print(f'Input image shape: {image.shape}')
 
-    out = model(image[None, :].permute(0, 3, 1, 2))
+    batch_sizes = [1, 2, 4, 8, 16, 32, 64, 128, 256]
+    hf_time, custom_time = benchmark(pretrained_model, model, batch_sizes=batch_sizes)
+
+    for bs, t1, t2 in zip(batch_sizes, hf_time, custom_time):
+        print(f'Batchsize {bs}: Hugginface: {t1}\tCustom: {t2}')
