@@ -88,7 +88,7 @@ def transfer_pretrained_weights(pretrained_model: torch.nn.Module, custom_model:
         for attn_layer in attention_layers:
             if attn_layer in layer_name:
                 layer_num, proj, type = layer_name.split('.')[2], layer_name.split('.')[-2], layer_name.split('.')[-1]
-                logger.info(f'Mapping from source\t{layer_name}\tLayer number: {layer_num} \tProjection: {proj} \tType: {type}')
+                logger.debug(f'Mapping from source\t{layer_name}\tLayer number: {layer_num} \tProjection: {proj} \tType: {type}')
                 custom_state_dict = map_attn_layers(layer_num, proj, type, weight, custom_state_dict)
 
     # Transfer rest of the layers
@@ -176,7 +176,7 @@ def benchmark(
                 o1 = model1(a)
         model1_end.record()
         torch.cuda.synchronize()
-        model1_time = model1_start.elapsed_time(model1_end) / 10
+        model1_time = model1_start.elapsed_time(model1_end) / reps
         model1_times.append(model1_time)
 
         model2_start.record()
@@ -185,7 +185,7 @@ def benchmark(
                 o2 = model2(a)
         model2_end.record()
         torch.cuda.synchronize()
-        model2_time = model2_start.elapsed_time(model2_end) / 10
+        model2_time = model2_start.elapsed_time(model2_end) / reps
         model2_times.append(model2_time)
 
         logger.info(f'Diff: {torch.max(torch.abs(o1[0]-o2))}')
