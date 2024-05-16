@@ -24,6 +24,7 @@ def softmax_kernel(
 
     mask = tl.arange(0, BLOCK_SIZE) < num_cols
     data = tl.load(input_ptr + batch_offset + row_offset, mask, other=-float('inf'))
+    data = data - tl.max(data, axis=0)
 
     row_wise_exp = tl.exp(data)
     row_wise_sum = tl.sum(row_wise_exp, axis=0)
@@ -48,7 +49,7 @@ def softmax_triton(A: torch.Tensor) -> torch.Tensor:
 
     batch, rows, cols = A.shape
 
-    output = torch.empty(size=A.shape).to(device, dtype)
+    output = torch.empty_like(A)
 
     BLOCK_SIZE = triton.next_power_of_2(cols)
     grid = (batch, rows, )

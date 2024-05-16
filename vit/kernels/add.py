@@ -2,13 +2,12 @@ import torch
 import triton
 import triton.language as tl
 
-from vit.utils import tensor_info
-
 device = 'cuda:0'
 
 
 @triton.autotune(
     configs=[
+        triton.Config({'bs_row': 256, 'bs_col': 256}, num_warps=8),
         triton.Config({'bs_row': 128, 'bs_col': 128}, num_warps=8),
         triton.Config({'bs_row': 64, 'bs_col': 64}, num_warps=8),
         triton.Config({'bs_row': 32, 'bs_col': 32}, num_warps=8),
@@ -21,7 +20,7 @@ device = 'cuda:0'
     key=['num_rows', 'num_cols']
 )
 @triton.jit
-def add_and_norm_kernel(
+def add_kernel(
     # Tensor params
     input1_ptr,
     input2_ptr,
@@ -54,11 +53,8 @@ def add_and_norm_kernel(
 
     add = input1 + input2
 
-    # Layernorm starts
-
     tl.store(out_ptr + batch_offset + data_offset, add, mask=data_mask)
 
-@tensor_info('add')
 def add_triton(
       input1: torch.Tensor,
       input2: torch.Tensor,
@@ -76,15 +72,15 @@ def add_triton(
 
     assert input1.is_contiguous() and input2.is_contiguous(), f"Input matrix needs to be contiguous"
     assert len(input1.shape) == 3, f"Only 3 dimensional input shapes are supported, provided: {input1.shape}"
-    assert input1.shape == input2.shape, f"Input shapes need to be same, provided {input1.shape}, {input2.shape}"
+    assert input1.shape == input2.shape, f"Input shapes need to be same, provided {input2.shape}, {input2.shape}"
 
     B, N, D = input1.shape
 
-    out = torch.empty_like(input1, device=input1.device, dtype=input1.dtype)
+    out = torch.empty_like(input1)
 
-    grid = lambda meta: (B, triton.cdiv(N, meta['bs_row']), triton.cdiv(D, meta['bs_col']))
+    grid = lambda meta: (B, triton.cdiv(N, 256), triton.cdiv(D, 256))
 
-    add_and_norm_kernel[grid](
+    add_kernel[grid](
         input1_ptr=input1,
         input2_ptr=input2,
         input_batch_stride=input1.stride(0),
@@ -97,7 +93,6 @@ def add_triton(
     )
 
     return out
-
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
@@ -163,8 +158,7 @@ if __name__ == '__main__':
             ms, min_ms, max_ms = triton.testing.do_bench(
                 lambda: torch.add(x, y), quantiles=quantiles)
 
-        def gbps(ms): return 2 * x.nelement() * \
-            x.element_size() * 1e-9 / (ms * 1e-3)
+        def gbps(ms): return 2 * (x.nelement() + y.nelement()) * x.element_size() * 1e-9 / (ms * 1e-3)
 
         return gbps(ms), gbps(max_ms), gbps(min_ms)
 

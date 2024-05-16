@@ -3,7 +3,7 @@ import triton
 import triton.language as tl
 
 device = 'cuda'
-dtype = torch.float16
+dtype = torch.float32
 
 @triton.autotune(
     configs=[
@@ -106,7 +106,7 @@ def layernorm_triton(A: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, 
     assert len(A.shape) == 3, f"Only 3 dimensional matrix is supported as input"
 
     # Output tensor
-    O = torch.empty_like(A, device='cuda', dtype=dtype)
+    O = torch.empty_like(A)
 
     batches, seq_len, dim = A.shape
     grid = (batches, seq_len, )
@@ -126,6 +126,20 @@ def layernorm_triton(A: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, 
 
     return O
 
+class LayerNormTriton(torch.nn.Module):
+    def __init__(self, dim: int, eps: float = 1e-5):
+        super().__init__()
+
+        self.dim = dim
+        self.eps = eps
+
+        self.weight = torch.nn.Parameter(torch.ones(self.dim))
+        self.bias = torch.nn.Parameter(torch.zeros(self.dim))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return layernorm_triton(
+            x, self.weight, self.bias, self.eps
+        )
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
@@ -140,11 +154,11 @@ if __name__ == '__main__':
     N = args.N
     D = args.D
 
-    a = torch.randint(0, 10, (B, N, D), device=device, dtype=dtype)
+    a = torch.randn((B, N, D), device=device, dtype=dtype)
     _shape = (a.shape[-1], )
-    weight = torch.randn(_shape, device=device, dtype=dtype)
-    bias = torch.randn(_shape, device=device, dtype=dtype)
-    eps = 1e-5
+    weight = torch.ones(_shape, device=device, dtype=dtype)
+    bias = torch.zeros(_shape, device=device, dtype=dtype)
+    eps = 1e-12
 
     y_pytorch = torch.nn.functional.layer_norm(a, _shape, weight, bias, eps).to(dtype)
     y_triton = layernorm_triton(a, weight=weight, bias=bias, eps=eps)
@@ -153,7 +167,7 @@ if __name__ == '__main__':
     print(f'PyTorch layer norm\n{y_pytorch}')
     print(f'Triton layer norm\n{y_triton}')
 
-    assert torch.allclose(y_triton, y_pytorch, atol=1e-2, rtol=0), 'Data does not match'
+    assert torch.allclose(y_triton, y_pytorch, atol=1e-6), f'Data does not match, diff = {torch.max(torch.abs(y_pytorch-y_triton))}'
 
     @triton.testing.perf_report(
         triton.testing.Benchmark(
