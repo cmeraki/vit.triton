@@ -42,7 +42,8 @@ def matmul_kernel(
     dim_out,
     bsx: tl.constexpr,
     bsy: tl.constexpr,
-    bsk: tl.constexpr
+    bsk: tl.constexpr,
+    group_sz: tl.constexpr
 ):
     """
     Matrix multiplication by loading rows of A
@@ -55,6 +56,11 @@ def matmul_kernel(
     row_idx = tl.program_id(axis=1)
     col_idx = tl.program_id(axis=2)
 
+    num_row_programs = tl.num_programs(1)
+    num_col_programs = tl.num_programs(2)
+
+    row_idxnew, col_idxnew = tl.swizzle2d(row_idx, col_idx, num_row_programs, num_col_programs, group_sz)
+
     # Batch offset for A and B will be the same
     a_offset_batch = batch_idx * A_stride_batch
     b_offset_batch = batch_idx * B_stride_batch
@@ -64,23 +70,22 @@ def matmul_kernel(
         offset_k = offset + tl.arange(0, bsk)
 
         # Read offsets from A_ptr
-        offset_a = row_idx * bsy + tl.arange(0, bsy)
+        offset_a = row_idxnew * bsy + tl.arange(0, bsy)
         mask_a = (offset_a[:, None] < seq_len) & (offset_k[None, :] < dim)
         offset_a = offset_a[:, None]*A_stride_height + offset_k[None, :]*A_stride_width  # by * bk
         a = tl.load(A_ptr + a_offset_batch + offset_a, mask_a)
 
         # Read offset from B_ptr
-        offset_b = col_idx * bsx + tl.arange(0, bsx)
+        offset_b = col_idxnew * bsx + tl.arange(0, bsx)
         mask_b = (offset_k[:, None] < dim) & (offset_b[None, :] < dim_out)
         offset_b = offset_k[:, None]*B_stride_height + offset_b[None, :]*B_stride_width  # bk * bx
         b = tl.load(B_ptr + b_offset_batch + offset_b, mask_b)
 
-        out = tl.dot(a, b, allow_tf32=True) # by, bx
-        output += out
+        output = tl.dot(a, b, output, allow_tf32=True) # by, bx
 
     offset_out_batch = batch_idx * O_stride_batch
-    offset_or = row_idx * bsy + tl.arange(0, bsy)
-    offset_oc = col_idx * bsx + tl.arange(0, bsx)
+    offset_or = row_idxnew * bsy + tl.arange(0, bsy)
+    offset_oc = col_idxnew * bsx + tl.arange(0, bsx)
     offset_o = offset_or[:, None]*O_stride_height + offset_oc[None, :]*O_stride_width  # by * bx
     mask_o = (offset_or[:, None] < seq_len) & (offset_oc[None, :] < dim_out)
 
@@ -126,7 +131,8 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
         batch_size=batch_size,
         seq_len=seq_len,
         dim=dim,
-        dim_out=dim_out
+        dim_out=dim_out,
+        group_sz=4
     )
 
     return O
@@ -139,10 +145,10 @@ if __name__ == '__main__':
     from argparse import ArgumentParser
     parser = ArgumentParser()
     
-    parser.add_argument('-batch_size', type=int)
-    parser.add_argument('-seq_len', type=int)
-    parser.add_argument('-din', type=int)
-    parser.add_argument('-dout', type=int)
+    parser.add_argument('-batch_size', type=int, default=2)
+    parser.add_argument('-seq_len', type=int, default=128)
+    parser.add_argument('-din', type=int, default=768)
+    parser.add_argument('-dout', type=int, default=512)
 
     args = parser.parse_args()
     print(f'Args: {args}')
