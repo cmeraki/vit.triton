@@ -106,7 +106,7 @@ class MultiHeadAttention(nn.Module):
             )
 
         # B x N x d_in
-        # TODO: P1 Torch cat is bad - can slow down the overall execution
+        # FIXME: P1 Torch cat is bad - can slow down the overall execution
         # consider preallocated tensors
         out = torch.cat(
             outputs,
@@ -208,6 +208,7 @@ class Embeddings(nn.Module):
         # TODO: P2 Possible to fuse kernels?
         x = torch.cat([cls_token, x], 1)
 
+        # FIXME: Custom add kernel is not working
         # return add(x, self.position_embeddings)
         return torch.add(x, self.position_embeddings)
 

@@ -2,6 +2,8 @@ import torch
 import triton
 import triton.language as tl
 
+from kernels.activations import gelu
+
 device = 'cuda:0'
 dtype=torch.float16
 
@@ -35,6 +37,10 @@ def matmul_kernel(
     O_stride_batch,
     O_stride_height, O_stride_width,
     M, N, K,
+    bias_ptr,
+    add_bias,
+    apply_activation,
+    activation: tl.constexpr,
     bsx: tl.constexpr, bsy: tl.constexpr, bsk: tl.constexpr, group_sz: tl.constexpr
 ):
     """
@@ -74,8 +80,7 @@ def matmul_kernel(
         mask_b = (offset_k[:, None] < K) & (mask_b[None, :] < N)
         b = tl.load(B_ptr + offset_b, mask_b)
 
-        o = tl.dot(a, b, allow_tf32=True) # bsy, bsx
-        output += o
+        output = tl.dot(a, b, output, allow_tf32=True)  # bsy, bsx
 
     offset_batch_out = batch_idx * O_stride_batch
     offset_or = row_idxnew * bsy + tl.arange(0, bsy)
@@ -83,24 +88,39 @@ def matmul_kernel(
     offset_o = offset_or[:, None]*O_stride_height+ offset_oc[None, :]*O_stride_width  # bsy * bsx
     mask_o = (offset_or[:, None] < M) & (offset_oc[None, :] < N)
 
+    if add_bias:
+        bias = tl.load(bias_ptr + offset_oc, offset_oc < N)
+        output += bias[None, :]
+
+    if apply_activation:
+        if activation == 'gelu':
+            output = gelu(output)
+
     tl.store(O_ptr + offset_batch_out + offset_o, output, mask_o)
 
 
-def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+def matmul_triton(A: torch.Tensor, B: torch.Tensor, bias: torch.Tensor = None, activation: str = None) -> torch.Tensor:
     """
     Implements matrix multiplication between input matrix A and B
     
     Args:
         - A {torch.Tensor}: Input matrix with shape (B, T, Cin) where B is the batch size, T is the sequence length, Cin is the input dimension
         - B {torch.Tensor}: Weight matrix with shape (Cin, Cout) where Cout is the hidden dimension
+        - bias {torch.Tensor}: Optionally add a bias to the ouput, shape (1, Cout)
+        - activation {str}: Optionally apply activation to the ouput
 
     Returns:
         - {torch.Tensor}: Output tensor with (B, T, Cout)
-
-    Output will be (B, T, T)
     """
     assert len(A.shape) == 3, "First input matrix needs to have 3 dimensions (B, T, C)"
     assert A.device == B.device and A.is_cuda, "Both matrix should be on GPU"
+
+    if bias is not None:
+        assert bias.is_cuda, "Bias is not on GPU"
+        assert bias.shape[1] == B.shape[1], "Bias shape does not match output feature dimension shape"
+
+    if activation:
+        assert activation in ["gelu"], f"Only GELU activation supported as of now! Provided: {activation}"
 
     batch_size, M, K = A.shape
     K, N = B.shape
@@ -117,6 +137,10 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
         O_stride_batch=O.stride(0),
         O_stride_height=O.stride(1), O_stride_width=O.stride(2),
         M=M, N=N, K=K,
+        bias_ptr=bias,
+        add_bias=True if bias is not None else False,
+        activation=activation,
+        apply_activation=True if activation else False
     )
 
     return O
@@ -137,24 +161,28 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print(f'Args: {args}')
     batch_size = args.B
-    M = args.M
-    K = args.K
-    N = args.N
+    m = args.M
+    k = args.K
+    n = args.N
 
-    A = torch.randint(0, 10, (batch_size, M, K), device='cuda', dtype=dtype)
-    B = torch.randint(0, 5, (K, N), device='cuda', dtype=dtype)
+    # a = torch.randint(0, 10, (batch_size, m, k), device='cuda', dtype=dtype)
+    # b = torch.randint(0, 5, (k, n), device='cuda', dtype=dtype)
 
-    assert A.shape[2] == B.shape[0], 'Matrix are not compatible for multiplication'
+    a = torch.randn((batch_size, m, k), device='cuda', dtype=dtype)
+    b = torch.randn((k, n), device='cuda', dtype=dtype)
 
-    y_pytorch = torch.matmul(A, B)
-    y_triton = matmul_triton(A, B)
+    bias = torch.randn((1, n), device='cuda', dtype=dtype)
 
-    print(f'Original matrix:\n{A}\n{B}')
+    y_pytorch = torch.matmul(a, b) + bias
+    y_pytorch = torch.nn.functional.gelu(y_pytorch)
+    y_triton = matmul_triton(a, b, bias=bias, activation="gelu")
+
+    print(f'Original matrix:\n{a}\n{b}\n{bias}')
     print(f'PyTorch:\n{y_pytorch}')
     print(f'Triton:\n{y_triton}')
 
     # Unit testing
-    assert torch.allclose(y_triton, y_pytorch), "Data does not match"
+    assert torch.allclose(y_triton, y_pytorch, atol=1e-2), "Data does not match"
 
     @triton.testing.perf_report(
         triton.testing.Benchmark(
@@ -178,13 +206,14 @@ if __name__ == '__main__':
     def benchmark(batch_size, M, N, K, provider):
         quantiles = [0.5, 0.2, 0.8]
 
-        A = torch.randint(0, 10, (batch_size, M, K), device='cuda', dtype=dtype)
-        B = torch.randint(0, 5, (K, N), device='cuda', dtype=dtype)
+        A = torch.randn((batch_size, M, K), device='cuda', dtype=dtype)
+        B = torch.randn((K, N), device='cuda', dtype=dtype)
+        bias = torch.randn((1, N), device='cuda', dtype=dtype)
 
         if provider == 'triton':
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul_triton(A, B), quantiles=quantiles)
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul_triton(A, B, bias), quantiles=quantiles)
         if provider == 'torch':
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(A, B), quantiles=quantiles)
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(A, B) + bias, quantiles=quantiles)
 
         def gbps(ms): return 2 * batch_size * M * N * K * 1e-12 / (ms * 1e-3)
 
