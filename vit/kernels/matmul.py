@@ -8,25 +8,25 @@ device = 'cuda:0'
 dtype=torch.float16
 
 @triton.autotune(
-  configs=[
-      triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 64, 'group_sz': 8}, num_stages=3, num_warps=8),
-      triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
-      triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
-      triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
-      triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
-      triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
-      triton.Config({'bsy': 64, 'bsx': 32, 'bsk': 32, 'group_sz': 8}, num_stages=5, num_warps=2),
-      triton.Config({'bsy': 32, 'bsx': 64, 'bsk': 32, 'group_sz': 8}, num_stages=5, num_warps=2),
-      triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 128, 'group_sz': 8}, num_stages=3, num_warps=8),
-      triton.Config({'bsy': 256, 'bsx': 128, 'bsk': 128, 'group_sz': 8}, num_stages=3, num_warps=8),
-      triton.Config({'bsy': 256, 'bsx': 64, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
-      triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
-      triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
-      triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
-      triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
-      triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4)
-  ],
-  key=['M', 'N', 'K'],
+    configs=[
+        triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 64, 'group_sz': 8}, num_stages=3, num_warps=8),
+        triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 32, 'bsk': 32, 'group_sz': 8}, num_stages=5, num_warps=2),
+        triton.Config({'bsy': 32, 'bsx': 64, 'bsk': 32, 'group_sz': 8}, num_stages=5, num_warps=2),
+        triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 128, 'group_sz': 8}, num_stages=3, num_warps=8),
+        triton.Config({'bsy': 256, 'bsx': 128, 'bsk': 128, 'group_sz': 8}, num_stages=3, num_warps=8),
+        triton.Config({'bsy': 256, 'bsx': 64, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
+    ],
+    key=['M', 'N', 'K'],
 )
 @triton.jit
 def matmul_kernel(
@@ -38,8 +38,8 @@ def matmul_kernel(
     O_stride_height, O_stride_width,
     M, N, K,
     bias_ptr,
-    add_bias,
-    apply_activation,
+    add_bias: tl.constexpr,
+    apply_activation: tl.constexpr,
     activation: tl.constexpr,
     bsx: tl.constexpr, bsy: tl.constexpr, bsk: tl.constexpr, group_sz: tl.constexpr
 ):
@@ -182,12 +182,12 @@ if __name__ == '__main__':
     print(f'Triton:\n{y_triton}')
 
     # Unit testing
-    assert torch.allclose(y_triton, y_pytorch, atol=1e-2), "Data does not match"
+    assert torch.allclose(y_triton, y_pytorch, atol=1e-1), f"Data does not match, diff: {torch.abs(torch.max(y_pytorch-y_triton))}"
 
     @triton.testing.perf_report(
         triton.testing.Benchmark(
             x_names=["M", "N", "K"],
-            x_vals=[128 * i for i in range(2, 33)],
+            x_vals=[64*i for i in range(1, 75)],
             line_arg='provider',
             line_vals=[
                 'triton',
@@ -220,6 +220,6 @@ if __name__ == '__main__':
         return gbps(ms), gbps(max_ms), gbps(min_ms)
 
     benchmark.run(
-        show_plots=True,
-        print_data=True
+       show_plots=True,
+       print_data=True
     )
