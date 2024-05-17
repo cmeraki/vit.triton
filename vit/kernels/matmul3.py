@@ -1,3 +1,4 @@
+import math
 import torch
 import triton
 import triton.language as tl
@@ -45,7 +46,9 @@ def matmul_kernel(
     bsx: tl.constexpr,
     bsy: tl.constexpr,
     bsk: tl.constexpr,
-    group_sz: tl.constexpr
+    group_sz: tl.constexpr,
+    apply_scaling: tl.constexpr,
+    scale_factor: tl.constexpr
 ):
     """
     Matrix multiplication by loading rows of A
@@ -91,16 +94,20 @@ def matmul_kernel(
     offset_o = offset_or[:, None]*O_stride_height + offset_oc[None, :]*O_stride_width  # by * bx
     mask_o = (offset_or[:, None] < seq_len) & (offset_oc[None, :] < dim_out)
 
+    if apply_scaling:
+        output = scale_factor*output
+
     tl.store(O_ptr + offset_out_batch + offset_o, output, mask_o)
 
 
-def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+def matmul_triton(A: torch.Tensor, B: torch.Tensor, apply_scaling: bool = False) -> torch.Tensor:
     """
     Implements matrix multiplication between input matrix A and B
     
     Args:
         - A {torch.Tensor}: Input matrix with shape (batch_size, seq_len, dim) where B is the batch size, T is the sequence length, Cin is the input dimension
         - B {torch.Tensor}: Weight matrix with shape (batch_size, dim, dim_out) where Cout is the hidden dimension
+        - apply_scaling {int}: If a scale factor should be applied to the output. 1/sqrt(dim_out) is multiplied to every element in the output
 
     Returns:
         - {torch.Tensor}: Output tensor with (batch_size, seq_len, dim_out)
@@ -134,6 +141,8 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
         seq_len=seq_len,
         dim=dim,
         dim_out=dim_out,
+        apply_scaling=apply_scaling,
+        scale_factor=1/math.sqrt(dim_out)
     )
 
     return O
@@ -166,8 +175,8 @@ if __name__ == '__main__':
 
     print(f'Matrix sizes: {a.shape}, {b.shape}')
 
-    y_pytorch = torch.matmul(a, b)
-    y_triton = matmul_triton(a, b)
+    y_pytorch = torch.matmul(a, b)/math.sqrt(dout)
+    y_triton = matmul_triton(a, b, apply_scaling=True)
 
     print(f'y_pytorch shape: {y_pytorch.shape}, y_triton shape: {y_triton.shape}')
 
@@ -206,9 +215,9 @@ if __name__ == '__main__':
         y = y.transpose(1, 2).contiguous()
 
         if provider == 'triton':
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul_triton(x, y), warmup=50, quantiles=quantiles)
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul_triton(x, y, apply_scaling=True), warmup=50, quantiles=quantiles)
         if provider == 'torch':
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(x, y), warmup=50, quantiles=quantiles)
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(x, y)/math.sqrt(dout), warmup=50, quantiles=quantiles)
 
         def gbps(ms): return 2 * seq_len * din * batch_size * 1e-12 / (ms * 1e-3)
 
@@ -216,6 +225,5 @@ if __name__ == '__main__':
 
     benchmark.run(
         show_plots=True,
-        print_data=True,
-        save_path='./assets/'
+        print_data=True
     )

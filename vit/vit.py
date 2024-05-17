@@ -15,23 +15,17 @@ from .kernels import (
 device = 'cuda:0'
 dtype = torch.float32
 
-# TODO: P0 Fuse matmul and bias
-# TODO: P0 Add activation support
-
 class LinearWithBias(nn.Module):
-    def __init__(self, input_dim: int, output_dim: int):
+    def __init__(self, input_dim: int, output_dim: int, activation: str = None):
         super().__init__()
 
         self.weight = nn.Parameter(torch.zeros(input_dim, output_dim))
         self.bias = nn.Parameter(torch.zeros(output_dim))
+        self.activation = activation
 
     ##@tensor_info('linear')
     def forward(self, x) -> torch.Tensor:
-        x = matmul(x, self.weight)
-        # TODO: P1 Handle broadcast addition
-        x = torch.add(x, self.bias)
-
-        return x
+        return matmul(x, self.weight, self.bias, self.activation)
 
 
 class SelfAttention(nn.Module):
@@ -62,10 +56,7 @@ class SelfAttention(nn.Module):
         # Inputs are B x N x d_out, B x N x d_out
         # Output is B x N x N
         k = k.transpose(1, 2).contiguous()
-        attn_scores = matmul3(q, k)
-
-        # TODO: P2 Fuse matmul and sqrt
-        attn_scores = attn_scores/math.sqrt(self.d_out)
+        attn_scores = matmul3(q, k, apply_scaling=True)
         attn_scores = softmax(attn_scores)
 
         # Inputs are B x N x N, B x N x d_out
@@ -149,8 +140,6 @@ class Transformer(nn.Module):
 
         out = self.layernorm_after(res)
         out = self.intermediate(out)
-        # P0: Replace with triton implementation
-        out = nn.functional.gelu(out)
         out = self.output(out)
 
         # Skip connection
