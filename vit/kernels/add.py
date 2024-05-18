@@ -4,18 +4,26 @@ import triton.language as tl
 
 device = 'cuda:0'
 
-
 @triton.autotune(
     configs=[
-        triton.Config({'bs_row': 256, 'bs_col': 256}, num_warps=8),
-        triton.Config({'bs_row': 128, 'bs_col': 128}, num_warps=8),
-        triton.Config({'bs_row': 64, 'bs_col': 64}, num_warps=8),
-        triton.Config({'bs_row': 32, 'bs_col': 32}, num_warps=8),
-        triton.Config({'bs_row': 16, 'bs_col': 16}, num_warps=8),
-        triton.Config({'bs_row': 128, 'bs_col': 128}, num_warps=4),
-        triton.Config({'bs_row': 64, 'bs_col': 64}, num_warps=4),
-        triton.Config({'bs_row': 32, 'bs_col': 32}, num_warps=4),
-        triton.Config({'bs_row': 16, 'bs_col': 16}, num_warps=4),
+        triton.Config({'bs_row': 256, 'bs_col': 256, 'group_sz': 8}, num_warps=8),
+        triton.Config({'bs_row': 128, 'bs_col': 128, 'group_sz': 8}, num_warps=8),
+        triton.Config({'bs_row': 64, 'bs_col': 64, 'group_sz': 8}, num_warps=8),
+        triton.Config({'bs_row': 32, 'bs_col': 32, 'group_sz': 8}, num_warps=8),
+        triton.Config({'bs_row': 16, 'bs_col': 16, 'group_sz': 8}, num_warps=8),
+        triton.Config({'bs_row': 128, 'bs_col': 128, 'group_sz': 8}, num_warps=4),
+        triton.Config({'bs_row': 64, 'bs_col': 64, 'group_sz': 8}, num_warps=4),
+        triton.Config({'bs_row': 32, 'bs_col': 32, 'group_sz': 8}, num_warps=4),
+        triton.Config({'bs_row': 16, 'bs_col': 16, 'group_sz': 8}, num_warps=4),
+        triton.Config({'bs_row': 256, 'bs_col': 256, 'group_sz': 4}, num_warps=8),
+        triton.Config({'bs_row': 128, 'bs_col': 128, 'group_sz': 4}, num_warps=8),
+        triton.Config({'bs_row': 64, 'bs_col': 64, 'group_sz': 4}, num_warps=8),
+        triton.Config({'bs_row': 32, 'bs_col': 32, 'group_sz': 4}, num_warps=8),
+        triton.Config({'bs_row': 16, 'bs_col': 16, 'group_sz': 4}, num_warps=8),
+        triton.Config({'bs_row': 128, 'bs_col': 128, 'group_sz': 4}, num_warps=4),
+        triton.Config({'bs_row': 64, 'bs_col': 64, 'group_sz': 4}, num_warps=4),
+        triton.Config({'bs_row': 32, 'bs_col': 32, 'group_sz': 4}, num_warps=4),
+        triton.Config({'bs_row': 16, 'bs_col': 16, 'group_sz': 4}, num_warps=4),
     ],
     key=['num_rows', 'num_cols']
 )
@@ -33,15 +41,21 @@ def add_kernel(
     out_ptr,
     # Kernel params
     bs_row: tl.constexpr,
-    bs_col: tl.constexpr
+    bs_col: tl.constexpr,
+    group_sz: tl.constexpr
 ):
     batch_idx = tl.program_id(axis=0)
     row_idx = tl.program_id(axis=1)
     col_idx = tl.program_id(axis=2)
 
+    rows = tl.num_programs(1)
+    cols = tl.num_programs(2)
+
+    row_idx_n, col_idx_n = tl.swizzle2d(row_idx, col_idx, rows, cols, group_sz)
+
     batch_offset = batch_idx*input_batch_stride
-    row_offset = row_idx*bs_row + tl.arange(0, bs_row)
-    col_offset = col_idx*bs_col + tl.arange(0, bs_col)
+    row_offset = row_idx_n*bs_row + tl.arange(0, bs_row)
+    col_offset = col_idx_n*bs_col + tl.arange(0, bs_col)
     data_offset = row_offset[:, None] * input_row_stride + col_offset[None, :] * input_col_stride
 
     row_mask = row_offset < num_rows
@@ -78,7 +92,7 @@ def add_triton(
 
     out = torch.empty_like(input1)
 
-    grid = lambda meta: (B, triton.cdiv(N, 256), triton.cdiv(D, 256))
+    grid = lambda meta: (B, triton.cdiv(N, meta['bs_row']), triton.cdiv(D, meta['bs_col']))
 
     add_kernel[grid](
         input1_ptr=input1,
@@ -97,10 +111,12 @@ def add_triton(
 if __name__ == '__main__':
     from argparse import ArgumentParser
 
+    dtype=torch.float16
+
     parser = ArgumentParser()
-    parser.add_argument('-B', type=int)
-    parser.add_argument('-N', type=int)
-    parser.add_argument('-D', type=int)
+    parser.add_argument('-B', type=int, default=2)
+    parser.add_argument('-N', type=int, default=2000)
+    parser.add_argument('-D', type=int, default=5000)
 
     args = parser.parse_args()
 
@@ -108,8 +124,8 @@ if __name__ == '__main__':
     num_tokens=args.N
     dim=args.D
 
-    A = torch.randn(batch_size, num_tokens, dim, dtype=torch.float16, device='cuda:0')
-    B = torch.randn(batch_size, num_tokens, dim, dtype=torch.float16, device='cuda:0')
+    A = torch.randn(batch_size, num_tokens, dim, dtype=dtype, device='cuda:0')
+    B = torch.randn(batch_size, num_tokens, dim, dtype=dtype, device='cuda:0')
 
     y_torch = torch.add(A, B)
     y_triton = add_triton(A, B)
@@ -127,9 +143,9 @@ if __name__ == '__main__':
 
     @triton.testing.perf_report(
         triton.testing.Benchmark(
-            x_names=['N'],  # argument names to use as an x-axis for the plot
+            x_names=['N', 'D'],  # argument names to use as an x-axis for the plot
             # different possible values for `x_name`
-            x_vals=[128*i for i in range(2, 15)],
+            x_vals=[128*i for i in range(2, 50)],
             # argument name whose value corresponds to a different line in the plot
             line_arg='provider',
             line_vals=[
@@ -143,11 +159,11 @@ if __name__ == '__main__':
             styles=[('blue', '-'), ('green', '-')],
             ylabel="GB/s",
             plot_name="Performance",
-            args={'B': 4, 'D': 768},  # values for function arguments not in `x_names` and `y_name`
+            args={'B': 1},  # values for function arguments not in `x_names` and `y_name`
         ))
     def benchmark(B, N, D, provider):
-        x = torch.randn(B, N, D, device='cuda', dtype=torch.float32)
-        y = torch.randn(B, N, D, device='cuda', dtype=torch.float32)
+        x = torch.randn(B, N, D, device='cuda', dtype=dtype)
+        y = torch.randn(B, N, D, device='cuda', dtype=dtype)
 
         quantiles = [0.5, 0.2, 0.8]
 
@@ -165,5 +181,6 @@ if __name__ == '__main__':
 
     benchmark.run(
         show_plots=True,
-        print_data=True
+        print_data=True,
+        save_path='./assets/add/'
     )

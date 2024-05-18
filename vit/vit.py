@@ -33,7 +33,7 @@ class SelfAttention(nn.Module):
         self,
         d_in: int,
         d_out: int,
-        dropout: int = 0, #TODO: P1 Add dropout support
+        dropout: int = 0, #TODO: P1 Add dropout support, currently ViT does not have dropout, so not adding it
     ):
         super().__init__()
         self.d_in = d_in

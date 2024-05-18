@@ -23,7 +23,23 @@ dtype = torch.float32
         triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4)
+        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 64, 'group_sz': 4}, num_stages=3, num_warps=8),
+        triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 32, 'bsk': 32, 'group_sz': 4}, num_stages=5, num_warps=2),
+        triton.Config({'bsy': 32, 'bsx': 64, 'bsk': 32, 'group_sz': 4}, num_stages=5, num_warps=2),
+        triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 128, 'group_sz': 4}, num_stages=3, num_warps=8),
+        triton.Config({'bsy': 256, 'bsx': 128, 'bsk': 128, 'group_sz': 4}, num_stages=3, num_warps=8),
+        triton.Config({'bsy': 256, 'bsx': 64, 'bsk': 128, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 128, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4)
     ],
     key=['batch_size', 'seq_len', 'dim', 'dim_out'],
 )
@@ -66,7 +82,6 @@ def matmul_kernel(
 
     row_idxnew, col_idxnew = tl.swizzle2d(row_idx, col_idx, num_row_programs, num_col_programs, group_sz)
 
-    # Batch offset for A and B will be the same
     a_offset_batch = batch_idx * A_stride_batch
     b_offset_batch = batch_idx * B_stride_batch
     output = tl.zeros((bsy, bsx), dtype=tl.float32)
@@ -225,5 +240,6 @@ if __name__ == '__main__':
 
     benchmark.run(
         show_plots=True,
-        print_data=True
+        print_data=True,
+        save_path='./assets/matmul3/'
     )

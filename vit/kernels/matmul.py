@@ -2,7 +2,7 @@ import torch
 import triton
 import triton.language as tl
 
-from kernels.activations import gelu
+from .activations import gelu
 
 device = 'cuda:0'
 dtype=torch.float16
@@ -17,6 +17,7 @@ dtype=torch.float16
         triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 32, 'bsk': 32, 'group_sz': 8}, num_stages=5, num_warps=2),
         triton.Config({'bsy': 32, 'bsx': 64, 'bsk': 32, 'group_sz': 8}, num_stages=5, num_warps=2),
+        triton.Config({'bsy': 16, 'bsx': 16, 'bsk': 16, 'group_sz': 8}, num_stages=4, num_warps=2),
         triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 128, 'group_sz': 8}, num_stages=3, num_warps=8),
         triton.Config({'bsy': 256, 'bsx': 128, 'bsk': 128, 'group_sz': 8}, num_stages=3, num_warps=8),
         triton.Config({'bsy': 256, 'bsx': 64, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
@@ -25,6 +26,25 @@ dtype=torch.float16
         triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 64, 'group_sz': 4}, num_stages=3, num_warps=8),
+        triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 32, 'bsk': 32, 'group_sz': 4}, num_stages=5, num_warps=2),
+        triton.Config({'bsy': 32, 'bsx': 64, 'bsk': 32, 'group_sz': 4}, num_stages=5, num_warps=2),
+        triton.Config({'bsy': 16, 'bsx': 16, 'bsk': 16, 'group_sz': 4}, num_stages=4, num_warps=2),
+        triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 128, 'group_sz': 4}, num_stages=3, num_warps=8),
+        triton.Config({'bsy': 256, 'bsx': 128, 'bsk': 128, 'group_sz': 4}, num_stages=3, num_warps=8),
+        triton.Config({'bsy': 256, 'bsx': 64, 'bsk': 128, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 128, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 16, 'bsx': 16, 'bsk': 16, 'group_sz': 2}, num_stages=4, num_warps=2),
+        triton.Config({'bsy': 32, 'bsx': 32, 'bsk': 32, 'group_sz': 2}, num_stages=4, num_warps=2),
     ],
     key=['M', 'N', 'K'],
 )
@@ -153,10 +173,10 @@ if __name__ == '__main__':
     from argparse import ArgumentParser
     parser = ArgumentParser()
     
-    parser.add_argument('-B', type=int)
-    parser.add_argument('-M', type=int)
-    parser.add_argument('-K', type=int)
-    parser.add_argument('-N', type=int)
+    parser.add_argument('-B', type=int, default=4)
+    parser.add_argument('-M', type=int, default=20)
+    parser.add_argument('-K', type=int, default=30)
+    parser.add_argument('-N', type=int, default=10)
 
     args = parser.parse_args()
     print(f'Args: {args}')
@@ -221,5 +241,6 @@ if __name__ == '__main__':
 
     benchmark.run(
        show_plots=True,
-       print_data=True
+       print_data=True,
+       save_path='./assets/matmul/'
     )

@@ -144,9 +144,9 @@ class LayerNormTriton(torch.nn.Module):
 if __name__ == '__main__':
     from argparse import ArgumentParser
     parser = ArgumentParser()
-    parser.add_argument('-B', type=int)
-    parser.add_argument('-N', type=int)
-    parser.add_argument('-D', type=int)
+    parser.add_argument('-B', type=int, default=2)
+    parser.add_argument('-N', type=int, default=25)
+    parser.add_argument('-D', type=int, default=50)
 
     args = parser.parse_args()
 
@@ -210,5 +210,6 @@ if __name__ == '__main__':
 
     benchmark.run(
         show_plots=True,
-        print_data=True
+        print_data=True,
+        save_path='./assets/layernorm/'
     )
