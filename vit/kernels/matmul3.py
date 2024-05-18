@@ -1,28 +1,40 @@
+import math
 import torch
 import triton
 import triton.language as tl
 
 device = 'cuda:0'
+dtype = torch.float32
 
 @triton.autotune(
     configs=[
-        triton.Config({'bsy': 256, 'bsx': 256, 'bsk': 256}, num_warps=16),
-        triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128}, num_warps=16),
-        triton.Config({'bsy': 64, 'bsx': 64, 'bsk': 64}, num_warps=16),
-        triton.Config({'bsy': 32, 'bsx': 32, 'bsk': 32}, num_warps=16),
-        triton.Config({'bsy': 16, 'bsx': 16, 'bsk': 16}, num_warps=16),
-        triton.Config({'bsy': 256, 'bsx': 256, 'bsk': 256}, num_warps=8),
-        triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128}, num_warps=8),
-        triton.Config({'bsy': 64, 'bsx': 64, 'bsk': 64}, num_warps=8),
-        triton.Config({'bsy': 32, 'bsx': 32, 'bsk': 32}, num_warps=8),
-        triton.Config({'bsy': 16, 'bsx': 16, 'bsk': 16}, num_warps=8),
-        triton.Config({'bsy': 256, 'bsx': 256, 'bsk': 256}, num_warps=4),
-        triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128}, num_warps=4),
-        triton.Config({'bsy': 64, 'bsx': 64, 'bsk': 64}, num_warps=4),
-        triton.Config({'bsy': 32, 'bsx': 32, 'bsk': 32}, num_warps=4),
-        triton.Config({'bsy': 16, 'bsx': 16, 'bsk': 16}, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 64, 'group_sz': 8}, num_stages=3, num_warps=8),
+        triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 32, 'bsk': 32, 'group_sz': 8}, num_stages=5, num_warps=2),
+        triton.Config({'bsy': 32, 'bsx': 64, 'bsk': 32, 'group_sz': 8}, num_stages=5, num_warps=2),
+        triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 128, 'group_sz': 8}, num_stages=3, num_warps=8),
+        triton.Config({'bsy': 256, 'bsx': 128, 'bsk': 128, 'group_sz': 8}, num_stages=3, num_warps=8),
+        triton.Config({'bsy': 256, 'bsx': 64, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 64, 'group_sz': 4}, num_stages=3, num_warps=8),
+        triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 32, 'bsx': 64, 'bsk': 32, 'group_sz': 4}, num_stages=5, num_warps=2),
+        triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 128, 'group_sz': 4}, num_stages=3, num_warps=8),
+        triton.Config({'bsy': 256, 'bsx': 128, 'bsk': 128, 'group_sz': 4}, num_stages=3, num_warps=8),
+        triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 128, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4)
     ],
-  key=['batch_size', 'seq_len', 'dim'],
+    key=['batch_size', 'seq_len', 'dim', 'dim_out'],
 )
 @triton.jit
 def matmul_kernel(
@@ -42,7 +54,10 @@ def matmul_kernel(
     dim_out,
     bsx: tl.constexpr,
     bsy: tl.constexpr,
-    bsk: tl.constexpr
+    bsk: tl.constexpr,
+    group_sz: tl.constexpr,
+    apply_scaling: tl.constexpr,
+    scale_factor: tl.constexpr
 ):
     """
     Matrix multiplication by loading rows of A
@@ -55,7 +70,11 @@ def matmul_kernel(
     row_idx = tl.program_id(axis=1)
     col_idx = tl.program_id(axis=2)
 
-    # Batch offset for A and B will be the same
+    num_row_programs = tl.num_programs(1)
+    num_col_programs = tl.num_programs(2)
+
+    row_idxnew, col_idxnew = tl.swizzle2d(row_idx, col_idx, num_row_programs, num_col_programs, group_sz)
+
     a_offset_batch = batch_idx * A_stride_batch
     b_offset_batch = batch_idx * B_stride_batch
     output = tl.zeros((bsy, bsx), dtype=tl.float32)
@@ -64,36 +83,39 @@ def matmul_kernel(
         offset_k = offset + tl.arange(0, bsk)
 
         # Read offsets from A_ptr
-        offset_a = row_idx * bsy + tl.arange(0, bsy)
+        offset_a = row_idxnew * bsy + tl.arange(0, bsy)
         mask_a = (offset_a[:, None] < seq_len) & (offset_k[None, :] < dim)
         offset_a = offset_a[:, None]*A_stride_height + offset_k[None, :]*A_stride_width  # by * bk
         a = tl.load(A_ptr + a_offset_batch + offset_a, mask_a)
 
         # Read offset from B_ptr
-        offset_b = col_idx * bsx + tl.arange(0, bsx)
+        offset_b = col_idxnew * bsx + tl.arange(0, bsx)
         mask_b = (offset_k[:, None] < dim) & (offset_b[None, :] < dim_out)
         offset_b = offset_k[:, None]*B_stride_height + offset_b[None, :]*B_stride_width  # bk * bx
         b = tl.load(B_ptr + b_offset_batch + offset_b, mask_b)
 
-        out = tl.dot(a, b, allow_tf32=True) # by, bx
-        output += out
+        output = tl.dot(a, b, output, allow_tf32=True) # by, bx
 
     offset_out_batch = batch_idx * O_stride_batch
-    offset_or = row_idx * bsy + tl.arange(0, bsy)
-    offset_oc = col_idx * bsx + tl.arange(0, bsx)
+    offset_or = row_idxnew * bsy + tl.arange(0, bsy)
+    offset_oc = col_idxnew * bsx + tl.arange(0, bsx)
     offset_o = offset_or[:, None]*O_stride_height + offset_oc[None, :]*O_stride_width  # by * bx
     mask_o = (offset_or[:, None] < seq_len) & (offset_oc[None, :] < dim_out)
+
+    if apply_scaling:
+        output = scale_factor*output
 
     tl.store(O_ptr + offset_out_batch + offset_o, output, mask_o)
 
 
-def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+def matmul_triton(A: torch.Tensor, B: torch.Tensor, apply_scaling: bool = False, scale_factor: float = 1.0) -> torch.Tensor:
     """
     Implements matrix multiplication between input matrix A and B
     
     Args:
         - A {torch.Tensor}: Input matrix with shape (batch_size, seq_len, dim) where B is the batch size, T is the sequence length, Cin is the input dimension
         - B {torch.Tensor}: Weight matrix with shape (batch_size, dim, dim_out) where Cout is the hidden dimension
+        - apply_scaling {int}: If a scale factor should be applied to the output. 1/sqrt(dim_out) is multiplied to every element in the output
 
     Returns:
         - {torch.Tensor}: Output tensor with (batch_size, seq_len, dim_out)
@@ -126,7 +148,9 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
         batch_size=batch_size,
         seq_len=seq_len,
         dim=dim,
-        dim_out=dim_out
+        dim_out=dim_out,
+        apply_scaling=apply_scaling,
+        scale_factor=scale_factor
     )
 
     return O
@@ -139,10 +163,10 @@ if __name__ == '__main__':
     from argparse import ArgumentParser
     parser = ArgumentParser()
     
-    parser.add_argument('-batch_size', type=int)
-    parser.add_argument('-seq_len', type=int)
-    parser.add_argument('-din', type=int)
-    parser.add_argument('-dout', type=int)
+    parser.add_argument('-batch_size', type=int, default=4)
+    parser.add_argument('-seq_len', type=int, default=120)
+    parser.add_argument('-din', type=int, default=760)
+    parser.add_argument('-dout', type=int, default=500)
 
     args = parser.parse_args()
     print(f'Args: {args}')
@@ -152,29 +176,29 @@ if __name__ == '__main__':
     din = args.din
     dout = args.dout
 
-    A = torch.randint(0, 5, (batch_size, seq_len, din), device='cuda', dtype=torch.float32)
-    B = torch.randint(0, 5, (batch_size, dout, din), device='cuda', dtype=torch.float32)
+    a = torch.randn((batch_size, seq_len, din), device=device, dtype=dtype)
+    b = torch.randn((batch_size, dout, din), device=device, dtype=dtype)
 
-    B = B.transpose(1, 2).contiguous()
+    b = b.transpose(1, 2).contiguous()
 
-    print(f'Matrix sizes: {A.shape}, {B.shape}')
+    print(f'Matrix sizes: {a.shape}, {b.shape}')
 
-    y_pytorch = torch.matmul(A, B)
-    y_triton = matmul_triton(A, B)
+    y_pytorch = torch.matmul(a, b)/math.sqrt(din)
+    y_triton = matmul_triton(a, b, apply_scaling=True, scale_factor=1/math.sqrt(din))
 
     print(f'y_pytorch shape: {y_pytorch.shape}, y_triton shape: {y_triton.shape}')
 
-    print(f'Original matrix:\n{A}\n{B}')
+    print(f'Original matrix:\n{a}\n{b}')
     print(f'PyTorch:\n{y_pytorch}')
     print(f'Triton:\n{y_triton}')
 
     # Unit testing
-    assert torch.allclose(y_triton, y_pytorch), "Data does not match"
+    assert torch.allclose(y_triton, y_pytorch, atol=1e-2, rtol=0), f"Data does not match, diff: {torch.max(torch.abs(y_pytorch-y_triton))}"
 
     @triton.testing.perf_report(
         triton.testing.Benchmark(
             x_names=["seq_len", "din", "dout"],
-            x_vals=[64, 128, 256, 512, 1024],
+            x_vals=[64*i for i in range(1,75)],
             line_arg='provider',
             line_vals=[
                 'triton',
@@ -188,20 +212,20 @@ if __name__ == '__main__':
             ylabel="GB/s",
             plot_name="Performance",
             # values for function arguments not in `x_names` and `y_name`
-            args={'batch_size': 8},
+            args={'batch_size': 1},
         ))
     def benchmark(batch_size, seq_len, din, dout, provider):
         quantiles = [0.5, 0.2, 0.8]
 
-        x = torch.randint(0, 5, (batch_size, seq_len, din), device='cuda', dtype=torch.float32)
-        y = torch.randint(0, 5, (batch_size, dout, din), device='cuda', dtype=torch.float32)
+        x = torch.randn((batch_size, seq_len, din), device=device, dtype=dtype)
+        y = torch.randn((batch_size, dout, din), device=device, dtype=dtype)
 
         y = y.transpose(1, 2).contiguous()
 
         if provider == 'triton':
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul_triton(x, y), quantiles=quantiles)
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul_triton(x, y), warmup=50, quantiles=quantiles)
         if provider == 'torch':
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(x, y), quantiles=quantiles)
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(x, y), warmup=50, quantiles=quantiles)
 
         def gbps(ms): return 2 * seq_len * din * batch_size * 1e-12 / (ms * 1e-3)
 
@@ -209,5 +233,6 @@ if __name__ == '__main__':
 
     benchmark.run(
         show_plots=True,
-        print_data=True
+        print_data=True,
+        save_path='./benchmarks/matmul3/'
     )

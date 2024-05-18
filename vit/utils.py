@@ -1,7 +1,7 @@
 import sys
-import time
 import torch
 import functools
+import numpy as np
 from tqdm import tqdm
 
 from typing import List, Tuple
@@ -147,47 +147,45 @@ def benchmark(
     Returns:
         Tuple[List]: 2 lists with model time for different models
     """
-    model1_times = []
-    model2_times = []
-
-    model1_start = torch.cuda.Event(enable_timing=True)
-    model1_end = torch.cuda.Event(enable_timing=True)
-
-    model2_start = torch.cuda.Event(enable_timing=True)
-    model2_end = torch.cuda.Event(enable_timing=True)
-
 
     for bs in tqdm(batch_sizes, total=len(batch_sizes)):
+        model1_times = []
+        model2_times = []
+
         logger.info(f'Running for batch size: {bs}')
 
         a = torch.randn((bs, *input_shape)).to(device=model1.device, dtype=model1.dtype)
 
         # warmup run
         logger.info(f'Doing a warmup run')
-        with torch.no_grad():
-            for _ in range(warmups):
+        for _ in range(warmups):
+            with torch.no_grad():
                 _ = model1(a)
                 _ = model2(a)
         logger.info('Warmup run complete')
 
-        model1_start.record()
-        with torch.no_grad():
-            for _ in range(reps):
-                o1 = model1(a)
-        model1_end.record()
-        torch.cuda.synchronize()
-        model1_time = model1_start.elapsed_time(model1_end) / reps
-        model1_times.append(model1_time)
+        for _ in range(reps):
+            with torch.no_grad():
+                o1, model1_time = timed(model1, a)
+            model1_times.append(model1_time)
 
-        model2_start.record()
-        with torch.no_grad():
-            for _ in range(reps):
-                o2 = model2(a)
-        model2_end.record()
-        torch.cuda.synchronize()
-        model2_time = model2_start.elapsed_time(model2_end) / reps
-        model2_times.append(model2_time)
+        for _ in range(reps):
+            with torch.no_grad():
+                o2, model2_time = timed(model2, a)
+            model2_times.append(model2_time)
 
-        logger.info(f'Diff: {torch.max(torch.abs(o1[0]-o2))}')
+        logger.info(f'Diff: {torch.mean(torch.abs(o1[0]-o2))}')
+        logger.info(f'Batch size: {bs}\tModel 1 Mean: {np.mean(model1_times)}, Median: {np.mean(model1_times)}\tModel 2 Mean: {np.mean(model2_times)}, Median: {np.mean(model2_times)}')
 
-    return model1_times, model2_times
+
+def timed(fn, input):
+    """
+    Times a model call on GPU
+    """
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+    start.record()
+    result = fn(input)
+    end.record()
+    torch.cuda.synchronize()
+    return result, start.elapsed_time(end)

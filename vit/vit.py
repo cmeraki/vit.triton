@@ -15,23 +15,17 @@ from .kernels import (
 device = 'cuda:0'
 dtype = torch.float32
 
-# TODO: P0 Fuse matmul and bias
-# TODO: P0 Add activation support
-
 class LinearWithBias(nn.Module):
-    def __init__(self, input_dim: int, output_dim: int):
+    def __init__(self, input_dim: int, output_dim: int, activation: str = None):
         super().__init__()
 
         self.weight = nn.Parameter(torch.zeros(input_dim, output_dim))
         self.bias = nn.Parameter(torch.zeros(output_dim))
+        self.activation = activation
 
     ##@tensor_info('linear')
     def forward(self, x) -> torch.Tensor:
-        x = matmul(x, self.weight)
-        # TODO: P1 Handle broadcast addition
-        x = torch.add(x, self.bias)
-
-        return x
+        return matmul(x, self.weight, self.bias, self.activation)
 
 
 class SelfAttention(nn.Module):
@@ -39,7 +33,7 @@ class SelfAttention(nn.Module):
         self,
         d_in: int,
         d_out: int,
-        dropout: int = 0, #TODO: P1 Add dropout support
+        dropout: int = 0, #TODO: P1 Add dropout support, currently ViT does not have dropout, so not adding it
     ):
         super().__init__()
         self.d_in = d_in
@@ -59,13 +53,10 @@ class SelfAttention(nn.Module):
         k = self.key(x)
         v = self.value(x)
 
-        # Inputs are B x N x d_out, B x N x d_out
+        # Inputs are B x N x d_out, B x d_out x N
         # Output is B x N x N
         k = k.transpose(1, 2).contiguous()
-        attn_scores = matmul3(q, k)
-
-        # TODO: P2 Fuse matmul and sqrt
-        attn_scores = attn_scores/math.sqrt(self.d_out)
+        attn_scores = matmul3(q, k, apply_scaling=True, scale_factor=1/math.sqrt(self.d_out))
         attn_scores = softmax(attn_scores)
 
         # Inputs are B x N x N, B x N x d_out
@@ -96,24 +87,18 @@ class MultiHeadAttention(nn.Module):
 
     #@tensor_info('mha')
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        outputs = []
-        for attn in self.attention:
+        # B x N x d_in
+        attn_output = torch.empty_like(x)
+
+        for i, attn in enumerate(self.attention):
             # Naive: Process one head at a time
             # Each elem in output will be B x N x d_out
             # TODO: P2 Implement MHA in a more optimized kernel
-            outputs.append(
-                attn(x)
-            )
+            op = attn(x)
+            attn_output[:, :, i*self.d_out:(i+1)*self.d_out] = op
 
-        # B x N x d_in
-        # TODO: P1 Torch cat is bad - can slow down the overall execution
-        # consider preallocated tensors
-        out = torch.cat(
-            outputs,
-            dim=-1
-        ).contiguous()
-
-        out = self.output(out)
+        attn_output = attn_output.contiguous()
+        out = self.output(attn_output)
 
         return out
 
@@ -132,7 +117,7 @@ class Transformer(nn.Module):
 
         self.layernorm_before = LayerNormTriton(self.d_in, eps=1e-12)
         self.attention = MultiHeadAttention(self.num_heads, self.d_in, self.d_out)
-        self.intermediate = LinearWithBias(self.d_in, 4*self.d_in)
+        self.intermediate = LinearWithBias(self.d_in, 4*self.d_in, activation='gelu')
         self.output = LinearWithBias(4*self.d_in, self.d_in)
         self.layernorm_after = LayerNormTriton(self.d_in, eps=1e-12)
 
@@ -144,18 +129,14 @@ class Transformer(nn.Module):
         )
 
         # First residual connection
-        res = attn + x
-        # res = add(attn, x)
+        res = add(attn, x)
 
         out = self.layernorm_after(res)
         out = self.intermediate(out)
-        # P0: Replace with triton implementation
-        out = nn.functional.gelu(out)
         out = self.output(out)
 
         # Skip connection
-        # out = add(out, res)
-        out = out + res
+        out = add(out, res)
 
         return out
 
@@ -205,11 +186,9 @@ class Embeddings(nn.Module):
         batch_size = x.shape[0]
         cls_token = self.cls_token.expand(batch_size, -1, -1)
 
-        # TODO: P2 Possible to fuse kernels?
         x = torch.cat([cls_token, x], 1)
 
-        # return add(x, self.position_embeddings)
-        return torch.add(x, self.position_embeddings)
+        return add(x, self.position_embeddings)
 
 
 class VIT(nn.Module):
@@ -304,7 +283,5 @@ if __name__ == '__main__':
     print(f'Input image shape: {image.shape}')
 
     batch_sizes = [1, 2, 4, 8, 16, 32, 64, 128, 256]
-    hf_time, custom_time = benchmark(pretrained_model, model, batch_sizes=batch_sizes)
+    benchmark(pretrained_model, model, batch_sizes=batch_sizes)
 
-    for bs, t1, t2 in zip(batch_sizes, hf_time, custom_time):
-        print(f'Batchsize {bs}: Hugginface: {t1}\tCustom: {t2}')

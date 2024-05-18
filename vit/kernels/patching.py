@@ -1,9 +1,6 @@
-import sys
 import torch
 import triton
 import triton.language as tl
-
-from vit.utils import tensor_info
 
 device = 'cuda:0'
 
@@ -54,7 +51,6 @@ def patching_kernel(
     tl.store(out_ptr + batch_offset + out_offset + P*P*2, tl.ravel(img_b), mask=out_mask)
 
 
-@tensor_info('patching')
 def patching_triton(image: torch.Tensor, patch_size: int) -> torch.Tensor:
     """
     Patching function which calls triton kernel
@@ -178,5 +174,6 @@ if __name__ == '__main__':
 
     benchmark.run(
         show_plots=True,
-        print_data=True
+        print_data=True,
+        save_path='./benchmarks/patching/'
     )
