@@ -10,10 +10,8 @@ dtype = torch.float32
     configs=[
         triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 64, 'group_sz': 8}, num_stages=3, num_warps=8),
         triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 32, 'bsk': 32, 'group_sz': 8}, num_stages=5, num_warps=2),
         triton.Config({'bsy': 32, 'bsx': 64, 'bsk': 32, 'group_sz': 8}, num_stages=5, num_warps=2),
         triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 128, 'group_sz': 8}, num_stages=3, num_warps=8),
@@ -21,23 +19,18 @@ dtype = torch.float32
         triton.Config({'bsy': 256, 'bsx': 64, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 64, 'group_sz': 4}, num_stages=3, num_warps=8),
         triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 64, 'bsx': 32, 'bsk': 32, 'group_sz': 4}, num_stages=5, num_warps=2),
         triton.Config({'bsy': 32, 'bsx': 64, 'bsk': 32, 'group_sz': 4}, num_stages=5, num_warps=2),
         triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 128, 'group_sz': 4}, num_stages=3, num_warps=8),
         triton.Config({'bsy': 256, 'bsx': 128, 'bsk': 128, 'group_sz': 4}, num_stages=3, num_warps=8),
-        triton.Config({'bsy': 256, 'bsx': 64, 'bsk': 128, 'group_sz': 4}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 128, 'group_sz': 4}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128, 'group_sz': 4}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4)
     ],
@@ -115,7 +108,7 @@ def matmul_kernel(
     tl.store(O_ptr + offset_out_batch + offset_o, output, mask_o)
 
 
-def matmul_triton(A: torch.Tensor, B: torch.Tensor, apply_scaling: bool = False) -> torch.Tensor:
+def matmul_triton(A: torch.Tensor, B: torch.Tensor, apply_scaling: bool = False, scale_factor: float = 1.0) -> torch.Tensor:
     """
     Implements matrix multiplication between input matrix A and B
     
@@ -157,7 +150,7 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor, apply_scaling: bool = False)
         dim=dim,
         dim_out=dim_out,
         apply_scaling=apply_scaling,
-        scale_factor=1/math.sqrt(dim_out)
+        scale_factor=scale_factor
     )
 
     return O
@@ -183,15 +176,15 @@ if __name__ == '__main__':
     din = args.din
     dout = args.dout
 
-    a = torch.randint(0, 10, (batch_size, seq_len, din), device=device, dtype=dtype)
-    b = torch.randint(0, 10, (batch_size, dout, din), device=device, dtype=dtype)
+    a = torch.randn((batch_size, seq_len, din), device=device, dtype=dtype)
+    b = torch.randn((batch_size, dout, din), device=device, dtype=dtype)
 
     b = b.transpose(1, 2).contiguous()
 
     print(f'Matrix sizes: {a.shape}, {b.shape}')
 
-    y_pytorch = torch.matmul(a, b)/math.sqrt(dout)
-    y_triton = matmul_triton(a, b, apply_scaling=True)
+    y_pytorch = torch.matmul(a, b)/math.sqrt(din)
+    y_triton = matmul_triton(a, b, apply_scaling=True, scale_factor=1/math.sqrt(din))
 
     print(f'y_pytorch shape: {y_pytorch.shape}, y_triton shape: {y_triton.shape}')
 
@@ -230,9 +223,9 @@ if __name__ == '__main__':
         y = y.transpose(1, 2).contiguous()
 
         if provider == 'triton':
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul_triton(x, y, apply_scaling=True), warmup=50, quantiles=quantiles)
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul_triton(x, y), warmup=50, quantiles=quantiles)
         if provider == 'torch':
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(x, y)/math.sqrt(dout), warmup=50, quantiles=quantiles)
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(x, y), warmup=50, quantiles=quantiles)
 
         def gbps(ms): return 2 * seq_len * din * batch_size * 1e-12 / (ms * 1e-3)
 
@@ -241,5 +234,5 @@ if __name__ == '__main__':
     benchmark.run(
         show_plots=True,
         print_data=True,
-        save_path='./assets/matmul3/'
+        save_path='./benchmarks/matmul3/'
     )

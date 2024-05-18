@@ -11,40 +11,29 @@ dtype=torch.float16
     configs=[
         triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 64, 'group_sz': 8}, num_stages=3, num_warps=8),
         triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 32, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 32, 'bsk': 32, 'group_sz': 8}, num_stages=5, num_warps=2),
         triton.Config({'bsy': 32, 'bsx': 64, 'bsk': 32, 'group_sz': 8}, num_stages=5, num_warps=2),
-        triton.Config({'bsy': 16, 'bsx': 16, 'bsk': 16, 'group_sz': 8}, num_stages=4, num_warps=2),
         triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 128, 'group_sz': 8}, num_stages=3, num_warps=8),
         triton.Config({'bsy': 256, 'bsx': 128, 'bsk': 128, 'group_sz': 8}, num_stages=3, num_warps=8),
         triton.Config({'bsy': 256, 'bsx': 64, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128, 'group_sz': 8}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 64, 'group_sz': 8}, num_stages=4, num_warps=4),
+        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 64, 'group_sz': 4}, num_stages=3, num_warps=8),
         triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 32, 'group_sz': 4}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 64, 'bsx': 32, 'bsk': 32, 'group_sz': 4}, num_stages=5, num_warps=2),
         triton.Config({'bsy': 32, 'bsx': 64, 'bsk': 32, 'group_sz': 4}, num_stages=5, num_warps=2),
-        triton.Config({'bsy': 16, 'bsx': 16, 'bsk': 16, 'group_sz': 4}, num_stages=4, num_warps=2),
         triton.Config({'bsy': 128, 'bsx': 256, 'bsk': 128, 'group_sz': 4}, num_stages=3, num_warps=8),
         triton.Config({'bsy': 256, 'bsx': 128, 'bsk': 128, 'group_sz': 4}, num_stages=3, num_warps=8),
-        triton.Config({'bsy': 256, 'bsx': 64, 'bsk': 128, 'group_sz': 4}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 256, 'bsk': 128, 'group_sz': 4}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 128, 'bsx': 128, 'bsk': 128, 'group_sz': 4}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 128, 'bsx': 64, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4),
         triton.Config({'bsy': 64, 'bsx': 128, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4),
-        triton.Config({'bsy': 16, 'bsx': 16, 'bsk': 16, 'group_sz': 2}, num_stages=4, num_warps=2),
-        triton.Config({'bsy': 32, 'bsx': 32, 'bsk': 32, 'group_sz': 2}, num_stages=4, num_warps=2),
+        triton.Config({'bsy': 128, 'bsx': 32, 'bsk': 64, 'group_sz': 4}, num_stages=4, num_warps=4)
     ],
     key=['M', 'N', 'K'],
 )
@@ -137,6 +126,7 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor, bias: torch.Tensor = None, a
 
     if bias is not None:
         assert bias.is_cuda, "Bias is not on GPU"
+        bias = bias.unsqueeze(0)
         assert bias.shape[1] == B.shape[1], "Bias shape does not match output feature dimension shape"
 
     if activation:
@@ -185,13 +175,10 @@ if __name__ == '__main__':
     k = args.K
     n = args.N
 
-    # a = torch.randint(0, 10, (batch_size, m, k), device='cuda', dtype=dtype)
-    # b = torch.randint(0, 5, (k, n), device='cuda', dtype=dtype)
-
     a = torch.randn((batch_size, m, k), device='cuda', dtype=dtype)
     b = torch.randn((k, n), device='cuda', dtype=dtype)
 
-    bias = torch.randn((1, n), device='cuda', dtype=dtype)
+    bias = torch.randn((n), device='cuda', dtype=dtype)
 
     y_pytorch = torch.matmul(a, b) + bias
     y_pytorch = torch.nn.functional.gelu(y_pytorch)
@@ -228,12 +215,12 @@ if __name__ == '__main__':
 
         A = torch.randn((batch_size, M, K), device='cuda', dtype=dtype)
         B = torch.randn((K, N), device='cuda', dtype=dtype)
-        bias = torch.randn((1, N), device='cuda', dtype=dtype)
+        bias = torch.randn((N), device='cuda', dtype=dtype)
 
         if provider == 'triton':
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul_triton(A, B, bias), quantiles=quantiles)
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul_triton(A, B, bias, "gelu"), quantiles=quantiles)
         if provider == 'torch':
-            ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(A, B) + bias, quantiles=quantiles)
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.nn.functional.gelu(torch.matmul(A, B) + bias), quantiles=quantiles)
 
         def gbps(ms): return 2 * batch_size * M * N * K * 1e-12 / (ms * 1e-3)
 
@@ -242,5 +229,5 @@ if __name__ == '__main__':
     benchmark.run(
        show_plots=True,
        print_data=True,
-       save_path='./assets/matmul/'
+       save_path='./benchmarks/matmul/'
     )

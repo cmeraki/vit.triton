@@ -211,5 +211,5 @@ if __name__ == '__main__':
     benchmark.run(
         show_plots=True,
         print_data=True,
-        save_path='./assets/layernorm/'
+        save_path='./benchmarks/layernorm/'
     )

@@ -158,8 +158,8 @@ def benchmark(
 
         # warmup run
         logger.info(f'Doing a warmup run')
-        with torch.no_grad():
-            for _ in range(warmups):
+        for _ in range(warmups):
+            with torch.no_grad():
                 _ = model1(a)
                 _ = model2(a)
         logger.info('Warmup run complete')
@@ -171,12 +171,11 @@ def benchmark(
 
         for _ in range(reps):
             with torch.no_grad():
-                o2, model2_time = timed(model1, a)
+                o2, model2_time = timed(model2, a)
             model2_times.append(model2_time)
 
-        logger.info(f'Diff: {torch.max(torch.abs(o1[0]-o2))}')
-
-        logger.info(f'Batch size: {bs}\tModel 1 Mean: {np.mean(model1_times)}, Median: {np.mean(model1_time)}\ttModel 2 Mean: {np.mean(model2_times)}, Median: {np.mean(model2_time)}')
+        logger.info(f'Diff: {torch.mean(torch.abs(o1[0]-o2))}')
+        logger.info(f'Batch size: {bs}\tModel 1 Mean: {np.mean(model1_times)}, Median: {np.mean(model1_times)}\tModel 2 Mean: {np.mean(model2_times)}, Median: {np.mean(model2_times)}')
 
 
 def timed(fn, input):

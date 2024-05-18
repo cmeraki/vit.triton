@@ -120,5 +120,5 @@ if __name__ == '__main__':
     benchmark.run(
         show_plots=True,
         print_data=True,
-        save_path='./assets/softmax/'
+        save_path='./benchmarks/softmax/'
     )
