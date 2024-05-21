@@ -137,7 +137,7 @@ def matmul_triton(A: torch.Tensor, B: torch.Tensor, bias: torch.Tensor = None, a
 
     grid = lambda meta: (batch_size, triton.cdiv(M, meta["bsy"]), triton.cdiv(N, meta["bsx"]))
 
-    O = torch.empty((batch_size, M, N)).to(A.device, A.dtype)
+    O = torch.empty((batch_size, M, N), device=A.device, dtype=A.dtype)
 
     matmul_kernel[grid](
         A, B, O,

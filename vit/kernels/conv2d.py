@@ -1,4 +1,3 @@
-import pdb
 import torch
 import triton
 import triton.language as tl
@@ -90,7 +89,6 @@ def conv2d_kernel(
             # Load kernel weights for the current channel
             kernel_offset = kernel_ptr + kernel_idx*kernel_dim_stride + c*kernel_channel_stride + kernel_row_offset + kernel_col_offset
             kernel_data = tl.load(kernel_offset, kernel_mask)
-
             dot_prdct = input_data * kernel_data
             elem += tl.sum(dot_prdct)
 
@@ -115,7 +113,7 @@ def conv2d_triton(
     assert height%kernel_height == 0 and width%kernel_width == 0, f"Input height and width should be divisible by the kernel height and width"
     assert channels == kernel_depth, f"Kernel channel depth ({kernel_depth}) and input channel depth ({channels}) should be same"
 
-    output = torch.empty((batch_size, num_kernels, height//kernel_height, width//kernel_width)).to(device, dtype)
+    output = torch.empty((batch_size, num_kernels, height//kernel_height, width//kernel_width), device=device, dtype=dtype)
 
     BLOCK_SIZE_ROW = triton.next_power_of_2(kernel_height)
     BLOCK_SIZE_COL = triton.next_power_of_2(kernel_width)
@@ -215,7 +213,7 @@ if __name__ == '__main__':
         triton.testing.Benchmark(
             x_names=['kernels'],  # argument names to use as an x-axis for the plot
             # different possible values for `x_name`
-            x_vals=[128*i for i in range(2, 15)],
+            x_vals=[64*i for i in range(2, 75)],
             # argument name whose value corresponds to a different line in the plot
             line_arg='provider',
             line_vals=[
@@ -270,5 +268,6 @@ if __name__ == '__main__':
 
     benchmark.run(
         show_plots=True,
-        print_data=True
+        print_data=True,
+        save_path='./benchmarks/conv2d/'
     )
