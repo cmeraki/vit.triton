@@ -4,9 +4,8 @@ import torch
 from torch import nn
 from typing import Optional
 from loguru import logger
-import pandas as pd
 
-from .utils import tensor_info, transfer_pretrained_weights#,benchmark
+from .utils import transfer_pretrained_weights#,benchmark
 from .kernels import (
     matmul,
     softmax,
@@ -46,20 +45,18 @@ class SelfAttention(nn.Module):
         self.d_in = d_in
         self.d_out = d_out
 
-        # Initializing Q, K, V with shapes (d_in, d_out)
-        self.query = LinearWithBias(self.d_in, self.d_out)
-        self.key = LinearWithBias(self.d_in, self.d_out)
-        self.value = LinearWithBias(self.d_in, self.d_out)
-        
+        # Merging all 3 projections into one
+        self.qkv = LinearWithBias(self.d_in, 3*d_out)
 
     #@tensor_info('self-attn')
     def forward(self, x: torch.Tensor) -> torch.Tensor:
 
-        # All three are B x N x d_out
-        # TODO: P2 Possible to merge all these 3 matmuls in single kernel?
-        q = self.query(x)
-        k = self.key(x)
-        v = self.value(x)
+        # All three are B x N x 3d_out
+        qkv_proj = self.qkv(x)
+        # Split back into Q, K, V
+        q = qkv_proj[:, :, :self.d_out].contiguous()
+        k = qkv_proj[:, :, self.dout:2*self.d_out]
+        v = qkv_proj[:, :, 2*self.d_out:3*self.d_out].contiguous()
 
         # Inputs are B x N x d_out, B x d_out x N
         # Output is B x N x N
@@ -248,9 +245,6 @@ class VIT(nn.Module):
 
 
 if __name__ == '__main__':
-    from PIL import Image
-    import requests
-    import numpy as np
 
     from transformers import ViTConfig, ViTModel
 
@@ -284,6 +278,10 @@ if __name__ == '__main__':
     )
 
     """
+    from PIL import Image
+    import requests
+    import numpy as np
+
     url = 'http://images.cocodataset.org/val2017/000000039769.jpg'
     image = Image.open(requests.get(url, stream=True).raw)
     image = image.resize((height, width))
@@ -292,6 +290,7 @@ if __name__ == '__main__':
 
     print(f'Input image shape: {image.shape}')
 
+    import pandas as pd
     batch_sizes = [1, 8, 32, 64, 128, 256]
     results = []
 
