@@ -8,7 +8,7 @@ logger.remove()
 logger.add(sys.stdout, format="[{time: YYYY-MM-DD HH:mm:ss} {level}] {message}", level="INFO")
 
 
-def map_attn_layers(source_layer_num: str, source_proj: str, source_type: str, source_tensor: torch.Tensor, dest_state_dict: OrderedDict) -> Dict:
+def map_attn_layers(source_layer_num: str, source_proj: str, source_type: str, source_tensor: torch.Tensor, dest_state_dict: dict) -> Dict:
     """
     Maps query, key and value weight matrices from pretrained model to custom model.
     This is required to handle seperately because in HF, the weight matrices are [d_model, d_head*n_head].
@@ -36,7 +36,7 @@ def map_attn_layers(source_layer_num: str, source_proj: str, source_type: str, s
 
     return dest_state_dict
 
-def map_non_attn_layers(source_state_dict: OrderedDict, dest_state_dict: OrderedDict, weight_mapping: Dict) -> Dict:
+def map_non_attn_layers(source_state_dict: dict, dest_state_dict: dict, weight_mapping: Dict) -> Dict:
     """
     Map non attention layers (patching, feed forward, layernorm etc.)
     In MLP layer, weights are transferred after applying a transpose just due to the convention of how HF stores the weight
