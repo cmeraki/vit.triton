@@ -25,7 +25,7 @@ device = 'cuda:0'
         triton.Config({'bs_row': 32, 'bs_col': 32, 'group_sz': 4}, num_warps=4),
         triton.Config({'bs_row': 16, 'bs_col': 16, 'group_sz': 4}, num_warps=4),
     ],
-    key=['num_rows', 'num_cols']
+    key=['num_batches', 'num_rows', 'num_cols']
 )
 @triton.jit
 def add_kernel(
@@ -48,14 +48,9 @@ def add_kernel(
     row_idx = tl.program_id(axis=1)
     col_idx = tl.program_id(axis=2)
 
-    rows = tl.num_programs(1)
-    cols = tl.num_programs(2)
-
-    row_idx_n, col_idx_n = tl.swizzle2d(row_idx, col_idx, rows, cols, group_sz)
-
     batch_offset = batch_idx*input_batch_stride
-    row_offset = row_idx_n*bs_row + tl.arange(0, bs_row)
-    col_offset = col_idx_n*bs_col + tl.arange(0, bs_col)
+    row_offset = row_idx*bs_row + tl.arange(0, bs_row)
+    col_offset = col_idx*bs_col + tl.arange(0, bs_col)
     data_offset = row_offset[:, None] * input_row_stride + col_offset[None, :] * input_col_stride
 
     row_mask = row_offset < num_rows
@@ -84,9 +79,9 @@ def add_triton(
         torch.Tensor: B * N * D
     """
 
-    assert input1.is_contiguous() and input2.is_contiguous(), f"Input matrix needs to be contiguous"
+    assert input1.is_contiguous() and input2.is_contiguous(), "Input matrix needs to be contiguous"
     assert len(input1.shape) == 3, f"Only 3 dimensional input shapes are supported, provided: {input1.shape}"
-    # assert input1.shape == input2.shape, f"Input shapes need to be same, provided {input2.shape}, {input2.shape}"
+    assert input1.shape == input2.shape, f"Input shapes need to be same, provided {input1.shape}, {input2.shape}"
 
     B, N, D = input1.shape
 

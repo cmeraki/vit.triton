@@ -1,7 +1,7 @@
 import torch
 import triton
 import triton.language as tl
-
+from typing import Optional
 from .activations import gelu
 
 device = 'cuda:0'
@@ -108,7 +108,7 @@ def matmul_kernel(
     tl.store(O_ptr + offset_batch_out + offset_o, output, mask_o)
 
 
-def matmul_triton(A: torch.Tensor, B: torch.Tensor, bias: torch.Tensor = None, activation: str = None) -> torch.Tensor:
+def matmul_triton(A: torch.Tensor, B: torch.Tensor, bias: Optional[torch.Tensor] = None, activation: Optional[str] = None) -> torch.Tensor:
     """
     Implements matrix multiplication between input matrix A and B
     
