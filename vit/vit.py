@@ -188,7 +188,8 @@ class Embeddings(nn.Module):
 
         x = torch.cat([cls_token, x], 1)
 
-        return add(x, self.position_embeddings)
+        # TODO: P1 Handle brodcast additions in `add`` kernel
+        return x + self.position_embeddings
 
 
 class VIT(nn.Module):
@@ -254,7 +255,7 @@ if __name__ == '__main__':
     num_heads = vit_config.num_attention_heads
     num_layers = vit_config.num_hidden_layers
 
-    model = VIT(
+    model: nn.Module = VIT(
         height=height,
         width=width,
         channels=channels,
@@ -263,7 +264,7 @@ if __name__ == '__main__':
         num_heads=num_heads,
         num_layers=num_layers
     )
-    model.to(device, dtype)
+    model.to(device=device, dtype=dtype)
 
     pretrained_model = ViTModel.from_pretrained(model_id, add_pooling_layer=False)
     pretrained_model.to(device, dtype)
@@ -282,6 +283,6 @@ if __name__ == '__main__':
 
     print(f'Input image shape: {image.shape}')
 
-    batch_sizes = [1, 2, 4, 8, 16, 32, 64, 128, 256]
+    batch_sizes = [1, 8, 32, 64, 256]
     benchmark(pretrained_model, model, batch_sizes=batch_sizes)
 

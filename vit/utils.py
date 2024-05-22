@@ -136,11 +136,11 @@ def capture_cuda_graph(model, static_input):
 def benchmark(
         model1: torch.nn.Module,
         model2: torch.nn.Module,
-        input_shape: Tuple[int] = (3, 224, 224),
+        input_shape: Tuple[int, int, int] = (3, 224, 224),
         batch_sizes: List[int] = [1, 4, 16, 32, 64, 128, 256],
         warmups: int = 50,
         reps: int = 100
-    ) -> Tuple[List]:
+    ) -> None:
     """
     Benchmark two models on different batch sizes
 
