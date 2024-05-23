@@ -248,10 +248,6 @@ class VIT(nn.Module):
 
 
 if __name__ == '__main__':
-    from PIL import Image
-    import requests
-    import numpy as np
-
     from transformers import ViTConfig, ViTModel
 
     model_id = 'google/vit-base-patch16-224'
@@ -283,16 +279,8 @@ if __name__ == '__main__':
         custom_model=model
     )
 
-    """
-    url = 'http://images.cocodataset.org/val2017/000000039769.jpg'
-    image = Image.open(requests.get(url, stream=True).raw)
-    image = image.resize((height, width))
-    image = torch.Tensor(np.array(image)).to(device=device, dtype=dtype)
-    image = image[None, :].permute(0, 3, 1, 2)
-
-    print(f'Input image shape: {image.shape}')
-
-    batch_sizes = [1, 8, 32, 64, 128, 256]
+    from .utils import benchmark
+    batch_sizes = [1, 8, 32, 64, 128, 156]
     results = []
 
     for result in benchmark(pretrained_model, model, batch_sizes=batch_sizes):
@@ -300,8 +288,10 @@ if __name__ == '__main__':
         results.append(result)
 
     results_df = pd.DataFrame(results, columns=['Batch Size', 'HF median time', 'Triton median time'])
-    """
 
+    results_df.to_csv('./benchmarks/model/benchmark.csv', index=False)
+
+    """
     import triton
     @triton.testing.perf_report(
         triton.testing.Benchmark(
@@ -334,4 +324,4 @@ if __name__ == '__main__':
         print_data=True,
         save_path='./benchmarks/model/'
     )
-
+    """

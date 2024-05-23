@@ -138,9 +138,9 @@ def benchmark(
         model2: torch.nn.Module,
         input_shape: Tuple[int, int, int] = (3, 224, 224),
         batch_sizes: List[int] = [1, 4, 16, 32, 64, 128, 256],
-        warmups: int = 50,
+        warmups: int = 25,
         reps: int = 100
-    ) -> None:
+    ):
     """
     Benchmark two models on different batch sizes
 
