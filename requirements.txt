@@ -1,0 +1,8 @@
+torch==2.1.2
+triton==2.3.0
+transformers==4.38.2
+typing_extensions==4.9.0
+loguru==0.7.2
+numpy==1.26.4
+tqdm==4.66.1
+pandas==2.1.3
