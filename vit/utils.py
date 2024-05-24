@@ -175,7 +175,7 @@ def benchmark(
             model2_times.append(model2_time)
         
         logger.info(f'Diff: {torch.mean(torch.abs(o1[0]-o2))}')
-        yield (bs, np.median(model1_times), np.median(model2_times))
+        yield (bs, round(np.median(model1_times), 2), round(np.median(model2_times), 2))
 
 
 def timed(fn, input):

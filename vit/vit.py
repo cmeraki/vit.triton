@@ -280,11 +280,11 @@ if __name__ == '__main__':
     )
 
     from .utils import benchmark
-    batch_sizes = [1, 8, 32, 64, 128, 156]
+    batch_sizes = [1, 8, 32, 64, 128, 256]
     results = []
 
     for result in benchmark(pretrained_model, model, batch_sizes=batch_sizes):
-        print(f'Batchsize: {result[0]}\tHF Median time: {result[1]}\tTriton Median time: {result[2]}')
+        print(f'Batchsize: {result[0]}\tHF Median time: {result[1]}\tTriton Median time: {result[2]}\tRatio: {result[2]/result[1]}')
         results.append(result)
 
     results_df = pd.DataFrame(results, columns=['Batch Size', 'HF median time', 'Triton median time'])
