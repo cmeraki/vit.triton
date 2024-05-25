@@ -1,8 +1,12 @@
+import sys
 import math
 import torch
 from torch import nn
+from typing import Optional
+from loguru import logger
+import pandas as pd
 
-from .utils import tensor_info, transfer_pretrained_weights, benchmark
+from .utils import tensor_info, transfer_pretrained_weights#,benchmark
 from .kernels import (
     matmul,
     softmax,
@@ -12,11 +16,14 @@ from .kernels import (
     Conv2DTriton
 )
 
+logger.remove()
+logger.add(sys.stdout, format="[{time: YYYY-MM-DD HH:mm:ss} {level}] {message}", level="INFO")
+
 device = 'cuda:0'
 dtype = torch.float32
 
 class LinearWithBias(nn.Module):
-    def __init__(self, input_dim: int, output_dim: int, activation: str = None):
+    def __init__(self, input_dim: int, output_dim: int, activation: Optional[str] = None):
         super().__init__()
 
         self.weight = nn.Parameter(torch.zeros(input_dim, output_dim))
@@ -43,6 +50,7 @@ class SelfAttention(nn.Module):
         self.query = LinearWithBias(self.d_in, self.d_out)
         self.key = LinearWithBias(self.d_in, self.d_out)
         self.value = LinearWithBias(self.d_in, self.d_out)
+        
 
     #@tensor_info('self-attn')
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -188,7 +196,8 @@ class Embeddings(nn.Module):
 
         x = torch.cat([cls_token, x], 1)
 
-        return add(x, self.position_embeddings)
+        # TODO: P1 Handle brodcast additions in `add`` kernel
+        return x + self.position_embeddings
 
 
 class VIT(nn.Module):
@@ -254,7 +263,7 @@ if __name__ == '__main__':
     num_heads = vit_config.num_attention_heads
     num_layers = vit_config.num_hidden_layers
 
-    model = VIT(
+    model: nn.Module = VIT(
         height=height,
         width=width,
         channels=channels,
@@ -263,7 +272,7 @@ if __name__ == '__main__':
         num_heads=num_heads,
         num_layers=num_layers
     )
-    model.to(device, dtype)
+    model.to(device=device, dtype=dtype)
 
     pretrained_model = ViTModel.from_pretrained(model_id, add_pooling_layer=False)
     pretrained_model.to(device, dtype)
@@ -274,6 +283,7 @@ if __name__ == '__main__':
         custom_model=model
     )
 
+    """
     url = 'http://images.cocodataset.org/val2017/000000039769.jpg'
     image = Image.open(requests.get(url, stream=True).raw)
     image = image.resize((height, width))
@@ -282,6 +292,46 @@ if __name__ == '__main__':
 
     print(f'Input image shape: {image.shape}')
 
-    batch_sizes = [1, 2, 4, 8, 16, 32, 64, 128, 256]
-    benchmark(pretrained_model, model, batch_sizes=batch_sizes)
+    batch_sizes = [1, 8, 32, 64, 128, 256]
+    results = []
+
+    for result in benchmark(pretrained_model, model, batch_sizes=batch_sizes):
+        print(f'Batchsize: {result[0]}\tHF Median time: {result[1]}\tTriton Median time: {result[2]}')
+        results.append(result)
+
+    results_df = pd.DataFrame(results, columns=['Batch Size', 'HF median time', 'Triton median time'])
+    """
+
+    import triton
+    @triton.testing.perf_report(
+        triton.testing.Benchmark(
+            x_names=['batch_size'],
+            x_vals=[1, 8, 16, 32, 64],
+            line_arg='provider',
+            line_vals=['triton', 'hf'],
+            line_names=['Triton', 'Huggingface'],
+            styles=[('blue', '-'), ('green', '-')],
+            ylabel='Time (ms)',
+            plot_name='Benchmark with Hugging Face',
+            args={'model1': model, 'model2': pretrained_model}
+        )
+    )
+    def benchmark(batch_size, model1, model2, provider):
+        quantiles = [0.5, 0.2, 0.8]
+        inp = torch.randn((batch_size, 3, 224, 224), device='cuda', dtype=torch.float32)
+
+        logger.info(f'Benchmarking for batch size: {batch_size} and provider: {provider}')
+
+        if provider == 'triton':
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: model1(inp), quantiles=quantiles) 
+        if provider == 'hf':
+            ms, min_ms, max_ms = triton.testing.do_bench(lambda: model2(inp), quantiles=quantiles)
+        
+        return ms, min_ms, max_ms
+
+    benchmark.run(
+        show_plots=True,
+        print_data=True,
+        save_path='./benchmarks/model/'
+    )
 

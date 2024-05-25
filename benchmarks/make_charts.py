@@ -1,9 +1,9 @@
 import pandas as pd
 from pathlib import Path
 import matplotlib.pyplot as plt
+from typing import Optional
 
-
-def create_chart(x: pd.DataFrame, name: str, save_path: str = None):
+def create_chart(x: pd.DataFrame, name: Path, save_path: Optional[Path] = None):
 
     col_names = x.columns
     plt.title(f'Benchmark of {name} kernel')

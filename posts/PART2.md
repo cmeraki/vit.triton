@@ -1,6 +1,5 @@
 <!-- markdownlint-disable MD036 MD029 -->
-
-# Understanding GPU programming model
+# Understanding the GPU programming model
 
 Given that you have read Part 1 of the series, you should have a basic understanding of the GPU hardware. Let's now understand the software that is used to run programs on the GPUs.
 
@@ -167,7 +166,7 @@ Let's reimplement the matrix multiplication example using Triton.
 
 ## How you can rewrite the complete architecture using optimized kernel
 
-Congrats on making this far away. Now that you understand the basics of GPU hardware and its programming model, you can go ahead and implement any network from scratch, this time not relying on PyTroch for operations but writing your own kernels in CUDA or Triton.
+Congrats on making this far away. Now that you understand the basics of GPU hardware and its programming model, you can go ahead and implement any network from scratch, this time not relying on PyTroch for operations but writing your kernels in CUDA or Triton.
 
 What would you require for that? If you want to implement a transformer encoder network, you would need to implement all the basic layers and operations in Triton or Kernel.
 
@@ -177,4 +176,4 @@ What would you require for that? If you want to implement a transformer encoder 
 4. Addition
 5. Concatenation
 
-You can then wrap these kernels in the PyTorch module and load weights from HF to compare your implementation with other PyTorch/TF native implementations. If this sounds interesting, this is exactly what we did too. We implemented most of the operations used in Vision Transformer (including patching and addition operations) in Triton and used HF weights to run a forward pass. You can look at the code [here](https://github.com/cmeraki/vit.triton) and maybe implement your own favorite model too using custom kernels!
+You can then wrap these kernels in the PyTorch module and load weights from HF to compare your implementation with other PyTorch/TF native implementations. If this sounds interesting, this is exactly what we did too. We implemented most of the operations used in Vision Transformer (including patching and addition operations) in Triton and used HF weights to run a forward pass. You can look at the code [here](https://github.com/cmeraki/vit.triton) and maybe implement your favorite model too using custom kernels!

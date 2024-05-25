@@ -136,11 +136,11 @@ def capture_cuda_graph(model, static_input):
 def benchmark(
         model1: torch.nn.Module,
         model2: torch.nn.Module,
-        input_shape: Tuple[int] = (3, 224, 224),
+        input_shape: Tuple[int, int, int] = (3, 224, 224),
         batch_sizes: List[int] = [1, 4, 16, 32, 64, 128, 256],
         warmups: int = 50,
         reps: int = 100
-    ) -> Tuple[List]:
+    ) -> None:
     """
     Benchmark two models on different batch sizes
 
@@ -157,7 +157,7 @@ def benchmark(
         a = torch.randn((bs, *input_shape)).to(device=model1.device, dtype=model1.dtype)
 
         # warmup run
-        logger.info(f'Doing a warmup run')
+        logger.info('Doing a warmup run')
         for _ in range(warmups):
             with torch.no_grad():
                 _ = model1(a)
@@ -173,9 +173,9 @@ def benchmark(
             with torch.no_grad():
                 o2, model2_time = timed(model2, a)
             model2_times.append(model2_time)
-
+        
         logger.info(f'Diff: {torch.mean(torch.abs(o1[0]-o2))}')
-        logger.info(f'Batch size: {bs}\tModel 1 Mean: {np.mean(model1_times)}, Median: {np.mean(model1_times)}\tModel 2 Mean: {np.mean(model2_times)}, Median: {np.mean(model2_times)}')
+        yield (bs, np.median(model1_times), np.median(model2_times))
 
 
 def timed(fn, input):
