@@ -10,13 +10,13 @@ Given that you have read Part 1 of the series, you should have a basic understan
 1. The physical concepts of hardware do not necessarily translate one-to-one to logical concepts in software.
 2. In GPU programming, we write a function that needs to be executed on the GPU. This is called a kernel. We can write multiple kernels in a single program and "launch" them from the CPU.
 
-Okay, with that out of the mind, let's understand a few important concepts of GPU programming -
+Okay, with that out of the way, let's understand a few important concepts of GPU programming.
 
 ### Threads
 
-Each kernel is executed by a thread in the GPU. And every thread executes the same kernel (assuming you have a single kernel in the program). This makes it necessary for us to write our kernel such that a single function can operate on all the data points. When we launch a kernel, what we are actually starting are GPU threads that will execute instructions written inside the kernel. We can start a lot of threads at once and these are the true powerhouse of the GPU.
+Each kernel is executed by a thread in the GPU. And every thread executes the same kernel (assuming you have a single kernel in the program). This makes it necessary for us to write our kernel such that a single function can operate on all the data points. When we launch a kernel, what we are starting are GPU threads that will execute instructions written inside the kernel. We can start a lot of threads at once and these are the true powerhouse of the GPU.
 
-All threads have some small memory associated with it which is called local memory. Apart from that, threads can also access shared memory, L2 cache, and global memory.
+All threads have some small memory associated with it which is called local memory. Apart from that, threads can also access the shared memory, L2 cache, and global memory.
 
 Physically, threads are assigned to cores. Cores execute software threads.
 
@@ -32,26 +32,26 @@ Similar to how threads are organized in blocks, blocks are themselves organized 
 
 Blocks inside a grid can be organized in the same way that threads are organized inside a block. A grid can have a 1D, 2D, or 3D array layout of the blocks. The arrangement of blocks and threads is just logical. A single program only executes a single grid at a time.
 
+![threads-blocks](image-2.png)
+
+Figure 1: Grids/Blocks/Threads layout
+Source: Borrowed from [this](https://siboehm.com/articles/22/CUDA-MMM) excellent blog.
+
 During execution, we start a total of `blocks per thread (b) * number of blocks (num)` physical threads. Each physical thread is numbered from `0` to `(b*num)-1`. So, how do you map your 2D or 3D structure of logical thread blocks to the physical thread? By unrolling.
 
 A 2D array layout can be to 1D. If it's row-major ordering, then a 2D matrix after unrolling will look like this:
 
 ![matrix unrolling](image-1.png)
 
-Figure 1: Element `A[2][3]` in the 2D matrix will be `A[5]` in the flattened 1D array. This is how you can think of mapping 2D blocks of thread to the 1D thread array.
-
-![threads-blocks](image-2.png)
-
-Figure 2: Grids/Blocks/Threads layout
-Source: Borrowed from [this](https://siboehm.com/articles/22/CUDA-MMM) excellent blog.
+Figure 2: Element `A[2][3]` in the 2D matrix will be `A[5]` in the flattened 1D array. This is how you can think of mapping 2D blocks of thread to the 1D thread array.
 
 When we arrange the blocks and threads in this 1D, 2D, or 3D layout, CUDA maps them to the x-axis, y-axis, and z-axis in its programming model. This will be useful in the next section.
 
 ## A simple example in CUDA
 
-Now that you have hopefully understood what threads, blocks, and grids are, let's start with CUDA. CUDA is a programming extension of C/C++ that helps us write heterogeneous programs. These programs allow us to define and launch kernels from the CPU. CUDA is very powerful and offers a lot of ways to optimize your kernel. It's just a bit ... too verbose.
+Now that you have hopefully understood what threads, blocks, and grids are, let's start with CUDA. CUDA is a programming extension of C/C++ that helps us write heterogeneous programs (that run on CPU and GPU). These programs allow us to define and launch kernels from the CPU. CUDA is very powerful and offers a lot of ways to optimize our kernels. It's just a bit ... too verbose.
 
-Let's slowly work through an example to understand how it works. Let's implement a very naive implementation of matrix multiplication. We will be using some CUDA function calls, they should be self-explanatory, but in case they are not, just google the syntax. This is a relatively simple kernel, so should be easy to follow along. Here are the general steps of writing and launching a kernel from CUDA:
+Let's slowly walk through an example to understand how CUDA works. Let's implement a very naive implementation of matrix multiplication. We will be using some CUDA function calls, they should be self-explanatory, but in case they are not, just google the syntax. This is a relatively simple kernel, so should be easy to follow along. Here are the general steps of writing and launching a kernel from CUDA:
 
 1. Allocate the memory for the data (both input and output) on the CPU memory (also called as host). We will allocate memory for our input (X), weight matrix (W), and output (O). Assuming B as the batch size, N as the number of rows or sequence length in transformers, D_in as the number of columns or embedding dimension, and D_out as the hidden dimension.
 
@@ -160,7 +160,7 @@ Hopefully, this figure will make it clearer about the offset calculation.
 
 ![alt text](cudakernels.png)
 
-Figure 3: If the ouptut data and threads have the exact length (which in our case is true), we can just map them 1 to 1. `B`, `N`, `D_out`, are the batch size, number of rows, and number of columns in the output data respectively. `b`, `n`, `d` is the `i th` batch, row, and column respectively.
+Figure 3: If the output data and threads have the exact length (which in our case is true), we can just map them 1 to 1. `B`, `N`, `D_out`, are the batch size, number of rows, and number of columns in the output data respectively. `b`, `n`, `d` is `i th` batch, row, and column respectively.
 
 After calculating these offsets, we are loading the corresponding row from `X` and the corresponding column from `W` and doing a single vector multiplication in a for loop. If you have understood the above `out_offset` calculation, it should be easy to follow this too.
 
@@ -307,13 +307,13 @@ def matmul_kernel(
     tl.store(output_data_ptr, result, mask=(output_row_mask & output_col_mask))
 ```
 
-Similar to CUDA, we get the current index of the block. But keep in mind, unlike CUDA where we process a single element of the output matrix, we are processing a single block (which is a 2D arrangement of a few elements). `tl.program_id` function helps us in getting the index position in every axes.
+Similar to CUDA, we get the current index of the block. But keep in mind, unlike CUDA where we process a single element of the output matrix, we are processing a single block (which is a 2D arrangement of a few elements). `tl.program_id` function helps us in getting the index position in every axis.
 
-1. `batch_idx` gets us the ouput matrix in the batch
+1. `batch_idx` gets us the output matrix in the batch
 2. `row_idx` gets us the block number along the rows. Remember, this is not equal to the row number as in CUDA
 3. `col_idx` gets us the block number along the columns. Remember, this is not equal to the column number as in CUDA
 
-Once we have all these 3 numbers, what we need to do is create a 2D representation of the data we want to load for computation. We have to take some dummy numbers to understand what is happening here. Assume that `B = 1`, `N = 16`, and `D_out = 12`. Our block size in both column and row dimension are 4 (i.e. `BLOCK_SIZE_ROW` and `BLOCK_SIZE_COL` is 4). So each block will be a 2D matrix of dimension (4 x 4).
+Once we have all these 3 numbers, what we need to do is create a 2D representation of the data we want to load for computation. We have to take some dummy numbers to understand what is happening here. Assume that `B = 1`, `N = 16`, and `D_out = 12`. Our block size in both column and row dimensions is 4 (i.e. `BLOCK_SIZE_ROW` and `BLOCK_SIZE_COL` is 4). So each block will be a 2D matrix of dimension (4 x 4).
 
 Based on this
 
@@ -321,7 +321,7 @@ Based on this
 grid = lambda meta: (B, triton.cdiv(N, meta["BLOCK_SIZE_ROW"]), triton.cdiv(D_out, meta["BLOCK_SIZE_COL"]))
 ```
 
-we would have the grid configuration as (1, 4, 3). We would be launching a total of 12 blocks. Now, what would it take to load the block with rows 8 to 11 and columns 4 to 7? Based on simple arithmetic, it looks like we should be loading `(1, 2, 1)`th block where first dimension corresponds the batch dimension, second dimension corresponds to the row dimension and third dimension corresponds to the column dimension. This would correspond to
+we would have the grid configuration as (1, 4, 3). We would be launching a total of 12 blocks. Now, what would it take to load the block with rows 8 to 11 and columns 4 to 7? Based on simple arithmetic, it looks like we should be loading `(1, 2, 1)`th block where the first dimension corresponds to the batch dimension, the second dimension corresponds to the row dimension and the third dimension corresponds to the column dimension. This would correspond to
 
 ```python
 tl.program_id(axis=0) == 1
@@ -356,7 +356,7 @@ output_row_offset = row_idx*BLOCK_SIZE_ROW + tl.arange(0, BLOCK_SIZE_ROW)
 # output_row_offset = 2*4 + (0, 1, 2, 3) = (8, 9, 10, 11)
 ```
 
-If we add it directly to our `output_ptr` we will get 8th, 9th, 10th and 11th element from the 1D flattened matrix. We don't want that. We want the highlighted elements. So we do a transformation:
+If we add it directly to our `output_ptr` we will get the 8th, 9th, 10th, and 11th element from the 1D flattened matrix. We don't want that. We want the highlighted elements. So we do a transformation:
 
 ```python
 output_row_offset = output_row_offset[:, None] * output_row_stride
@@ -385,13 +385,13 @@ Finally,
 output_data_ptr = output_ptr + output_batch_offset + output_row_offset + output_col_offset       # Adds all the offsets to the pointer
 ```
 
-Here, we first add `output_row_offset` and `output_col_offset`. Since one of them is a row vector and the other is a column vector, we would get all a 2D array with all the desired index of all the desired elements we wanted to laod. After that we add `output_batch_offset` to get to the correct martrix in the batch.
+Here, we first add `output_row_offset` and `output_col_offset`. Since one of them is a row vector and the other is a column vector, we would get a 2D array with all the desired indices of all the elements we wanted to load. After that, we add `output_batch_offset` to get to the correct matrix in the batch.
 
 ![offset_addition](offset_addition.png)
 
 Figure 6: How 2D blocks are created from 2 1D offsets
 
-This gives us the appropriate data. You can similarly load the relevant data for other tensors. The rest of the code is more about syntax rather than any core logic. So I'll leave that for you to explore. But if you udnerstand the offset calculation properly, you should be able to write your own kernels independently.
+This gives us the appropriate data. You can similarly load the relevant data for other tensors. The rest of the code is more about syntax rather than any core logic. So I'll leave that for you to explore. But if you understand the offset calculation properly, you should be able to write your kernels independently.
 
 The complete code is present [here](https://github.com/cmeraki/vit.triton/blob/main/examples/matmul_batch.py). You just need Triton and Torch for this example.
 
