@@ -1,5 +1,4 @@
 <!-- markdownlint-disable MD036 MD029 -->
-
 # Understanding the GPU programming model
 
 Given that you have read Part 1 of the series, you should have a basic understanding of the GPU hardware. Let's now understand the software that is used to run programs on the GPUs.
@@ -17,21 +16,21 @@ Okay, with that out of the mind, let's understand a few important concepts of GP
 
 Each kernel is executed by a thread in the GPU. And every thread executes the same kernel (assuming you have a single kernel in the program). This makes it necessary for us to write our kernel such that a single function can operate on all the data points. When we launch a kernel, what we are actually starting are GPU threads that will execute instructions written inside the kernel. We can start a lot of threads at once and these are the true powerhouse of the GPU.
 
-All threads have some small memory associated with it which is called local memory. Apart from that, threads can also access shared memory, L2 cache and global memory.
+All threads have some small memory associated with it which is called local memory. Apart from that, threads can also access shared memory, L2 cache, and global memory.
 
 Physically, threads are assigned to cores. Cores execute software threads.
 
 ### Blocks
 
-Threads are logically organized into blocks. Every block has a pre-defined number of threads assigned to it. *Just for logical purposes*, we can arrange threads inside a block in either 1D, 2D or 3D array layout. You can think of blocks as an array of threads. It's important to understand that this 1D, 2D or 3D arrangement is purely logical and for the developer's convenience only. This arrangement is provided so it's easier to visualize our input and output data. If we imagine that we want to operate on a 100x100 matrix, then we can just launch a kernel with a block size of 100 by 100 threads. That will start a total of $10^4$ (100x100) threads which we can use to map to the matrix. We can write our kernel such that every single thread operates on every single element of the matrix.
+Threads are logically organized into blocks. Every block has a pre-defined number of threads assigned to it. *Just for logical purposes*, we can arrange threads inside a block in either a 1D, 2D, or 3D array layout. You can think of blocks as an array of threads. It's important to understand that this 1D, 2D, or 3D arrangement is purely logical and for the developer's convenience only. This arrangement is provided so it's easier to visualize our input and output data. If we imagine that we want to operate on a 100x100 matrix, then we can just launch a kernel with a block size of 100 by 100 threads. That will start a total of $10^4$ (100x100) threads which we can use to map to the matrix. We can write our kernel such that every single thread operates on every single element of the matrix.
 
 In the physical world, every block is assigned an SM. Throughout its execution, the block will only be executed on the same SM. Since every block is assigned an SM, it also has access to the SM's shared memory (which we learned in the first part). All the threads that are part of a single block can access and share this memory.
 
 ### Grids
 
-Similar to how threads are organized in blocks, blocks are themselves organized into a grid. That helps us to launch multiple blocks at one time. As we discussed earlier, a single GPU has multiple SMs, we can launch multiple blocks at once so that all of our SMs and cores are utilized. Let's assume that our program executes 25 blocks and our GPU has 10 SMs. Then the program will execute 10 blocks in the first wave, 10 blocks in the second wave and 5 blocks in the third wave. The first two waves will have 100% optimization but the last wave will have 50% utilization.
+Similar to how threads are organized in blocks, blocks are themselves organized into a grid. That helps us to launch multiple blocks at one time. As we discussed earlier, a single GPU has multiple SMs, we can launch multiple blocks at once so that all of our SMs and cores are utilized. Let's assume that our program executes 25 blocks and our GPU has 10 SMs. Then the program will execute 10 blocks in the first wave, 10 blocks in the second wave, and 5 blocks in the third wave. The first two waves will have 100% optimization but the last wave will have 50% utilization.
 
-Blocks inside a grid can be organized in the same way that threads are organized inside a block. A grid can have a 1D, 2D or 3D array layout of the blocks. The arrangement of blocks and threads is just logical. A single program only executes a single grid at a time.
+Blocks inside a grid can be organized in the same way that threads are organized inside a block. A grid can have a 1D, 2D, or 3D array layout of the blocks. The arrangement of blocks and threads is just logical. A single program only executes a single grid at a time.
 
 During execution, we start a total of `blocks per thread (b) * number of blocks (num)` physical threads. Each physical thread is numbered from `0` to `(b*num)-1`. So, how do you map your 2D or 3D structure of logical thread blocks to the physical thread? By unrolling.
 
@@ -43,11 +42,11 @@ Figure 1: Element `A[2][3]` in the 2D matrix will be `A[5]` in the flattened 1D 
 
 ## A simple example in CUDA
 
-Now that you have hopefully understood what threads, blocks and grids are, let's start with CUDA. CUDA is a programming extension of C/C++ that helps us write heterogeneous programs. These programs allow us to define and launch kernels from the CPU. CUDA is very powerful and offers a lot of ways to optimize your kernel. It's just a bit ... too expressive.
+Now that you have hopefully understood what threads, blocks, and grids are, let's start with CUDA. CUDA is a programming extension of C/C++ that helps us write heterogeneous programs. These programs allow us to define and launch kernels from the CPU. CUDA is very powerful and offers a lot of ways to optimize your kernel. It's just a bit ... too expressive.
 
 Let's slowly work through an example to understand how it works. Let's implement a very naive implementation of matrix multiplication. We will be using some CUDA function calls, they should be self-explanatory, but in case they are not, just google the syntax. This is a relatively simple kernel, so should be easy to follow along.
 
-1. Allocate the memory for the data (both input and output) on the CPU memory (also called as host). We will allocate memory for our input (X), weight matrix (W) and output (O). Assuming B as the batch size, N as the number of rows or sequence length in transformers, D_in as the number of columns or embedding dimension and D_out as the hidden dimension.
+1. Allocate the memory for the data (both input and output) on the CPU memory (also called as host). We will allocate memory for our input (X), weight matrix (W), and output (O). Assuming B as the batch size, N as the number of rows or sequence length in transformers, D_in as the number of columns or embedding dimension, and D_out as the hidden dimension.
 
 ```C
 float *X = (float*)malloc(B*N*D_in*sizeof(float));      // Input data
@@ -131,7 +130,7 @@ __global__ void matMul(
 
 Remember that physically there is no 2D or 3D arrangement of threads. That construct is just provided by CUDA to help us map the problems appropriately. Physically it's just a single 1D array of threads. Since we have started `B*N*D_out` threads, it maps exactly with the 1D layout of our output matrix.
 
-To figure out which data a particular thread should process, the kernel just needs to figure out which thread is it executing. Depending on the batch, row and column, each thread will load different parts of the input and weight matrix. These are called offsets and we have calculated three offsets in our code:
+To figure out which data a particular thread should process, the kernel just needs to figure out which thread is it executing. Depending on the batch, row, and column, each thread will load different parts of the input and weight matrix. These are called offsets and we have calculated three offsets in our code:
 
 1. `batch_offset`: Figure out which batch this kernel is processing
    1. `blockDim.x` gives us the size of the block in the x direction (number of columns in the grid)
@@ -148,7 +147,7 @@ Source: Borrowed from [this](https://siboehm.com/articles/22/CUDA-MMM) excellent
 
 After calculating these offsets, we are loading the corresponding row from `X` and the corresponding column from `W` and doing a single vector multiplication in a for loop. The important part here is to understand the offset calculation and how we can make use of the block and grid layout to make our lives easier!
 
-The complete code is present here (# TODO). You would need to install `nvcc` and have an NVIDIA GPU to run the program.
+The complete code is present [here](https://github.com/cmeraki/vit.triton/blob/main/examples/matmul_batch.cu). You would need to install `nvcc` (the compiler for CUDA programs), have an NVIDIA GPU to run the program, and have the CUDA drivers, and CUDA toolkit installed.
 
 ## A simple example in Triton
 
@@ -167,7 +166,7 @@ Let's reimplement the matrix multiplication example using Triton.
 
 ## How you can rewrite the complete architecture using optimized kernel
 
-Congrats on making this far away. Now that you understand the basics of GPU hardware and its programming model, you can go ahead and implement any network from scratch, this time not relying on PyTroch for operations but writing your own kernels in CUDA or Triton.
+Congrats on making this far away. Now that you understand the basics of GPU hardware and its programming model, you can go ahead and implement any network from scratch, this time not relying on PyTroch for operations but writing your kernels in CUDA or Triton.
 
 What would you require for that? If you want to implement a transformer encoder network, you would need to implement all the basic layers and operations in Triton or Kernel.
 
@@ -177,4 +176,4 @@ What would you require for that? If you want to implement a transformer encoder 
 4. Addition
 5. Concatenation
 
-You can then wrap these kernels in the PyTorch module and load weights from HF to compare your implementation with other PyTorch/TF native implementations. If this sounds interesting, this is exactly what we did too. We implemented most of the operations used in Vision Transformer (including patching and addition operations) in Triton and used HF weights to run a forward pass. You can look at the code [here](https://github.com/cmeraki/vit.triton) and maybe implement your own favorite model too using custom kernels!
+You can then wrap these kernels in the PyTorch module and load weights from HF to compare your implementation with other PyTorch/TF native implementations. If this sounds interesting, this is exactly what we did too. We implemented most of the operations used in Vision Transformer (including patching and addition operations) in Triton and used HF weights to run a forward pass. You can look at the code [here](https://github.com/cmeraki/vit.triton) and maybe implement your favorite model too using custom kernels!
