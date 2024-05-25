@@ -24,9 +24,9 @@ The fastest way to run LLMs currently is to run them on GPUs. But why are GPUs f
 2. CPUs have a lot of functionalities in their cores. These functionalities help them operate in a variety of different tasks and hence CPUs are very robust. GPUs reduce these special functionalities which helps it to reduce the size of the cores. If the cores are smaller, you can fit more cores in the same area.
 
 ![CPU v GPU](image.png)
-[Source](https://docs.nvidia.com/cuda/archive/11.2.0/pdf/CUDA_C_Programming_Guide.pdf)
 
 **Figure 1**: The figure above helps explain both points. You can see how the cache and control logic sizes are extremely reduced in the GPU as compared to the CPU. The core size is also reduced. Both of these tradeoffs help us to fit more cores in the GPU.
+[Source](https://docs.nvidia.com/cuda/archive/11.2.0/pdf/CUDA_C_Programming_Guide.pdf)
 
 The more cores a GPU has, the greater the potential for parallel execution, which can lead to better performance. You may think it's all a game of cores. It's only partially true though! Why? Follow along and you'll see why.
 
