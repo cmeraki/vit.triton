@@ -6,11 +6,11 @@ Complete implementation of ViT (Vision Transformer) model using Triton kernels. 
 
 There are some accompanying posts under the [posts](./posts/) folder to help you get started with GPU programming.
 
-This repo can help you:
+This repo has 3 goals:
 
-1. Learn how to write Triton kernels
-2. How to implement an architecture using PyTorch but by calling custom triton kernels
-3. Load weights to your own implementation from a different repository like HuggingFace
+1. Learn GPU programming by learning how to write Triton kernels
+2. Learn to use triton kernels in a model by implementing an architecture using PyTorch but by calling custom triton kernels
+3. Learn to load model weights to your own implementation from a different repository like HuggingFace
 
 ## Repo structure
 

@@ -1,6 +1,6 @@
 <!-- markdownlint-disable MD036 MD029 -->
 
-# Understanding the GPU programming model
+# Understanding GPU programming model
 
 Given that you have read Part 1 of the series, you should have a basic understanding of the GPU hardware. Let's now understand the software that is used to run programs on the GPUs.
 
