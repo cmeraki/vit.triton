@@ -138,9 +138,9 @@ def benchmark(
         model2: torch.nn.Module,
         input_shape: Tuple[int, int, int] = (3, 224, 224),
         batch_sizes: List[int] = [1, 4, 16, 32, 64, 128, 256],
-        warmups: int = 50,
+        warmups: int = 25,
         reps: int = 100
-    ) -> None:
+    ):
     """
     Benchmark two models on different batch sizes
 
@@ -175,7 +175,7 @@ def benchmark(
             model2_times.append(model2_time)
         
         logger.info(f'Diff: {torch.mean(torch.abs(o1[0]-o2))}')
-        yield (bs, np.median(model1_times), np.median(model2_times))
+        yield (bs, round(np.median(model1_times), 2), round(np.median(model2_times), 2))
 
 
 def timed(fn, input):
