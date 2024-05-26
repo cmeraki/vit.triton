@@ -71,7 +71,18 @@ def matmul_kernel(
 
 
 def matmul(input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    """
+    Implements matrix multiplication between two matrices. The input matrix is 3 dimension where
+    first dimension is the batch size. The weight matrix will be multiplied with each of the batches
+    of the input matrix.
 
+    Args:
+        input (torch.Tensor): Matrix with dimension (B x N x D_in)
+        weight (torch.Tensor): Matrix with dimension (D_in x D_out)
+
+    Returns:
+        torch.Tensor: Ouptut matrix with dimension (B x N x D_out)
+    """    """"""
     assert input.is_cuda, 'Inputs are not on GPU, ensure the input matrix is loaded on the GPU'
     assert weight.is_cuda, 'Weights are not on GPU, ensure the weight matrix is loaded on the GPU'
     assert input.shape[-1] == weight.shape[-2], 'Input and weight matrix are not compatible'

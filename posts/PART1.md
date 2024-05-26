@@ -68,6 +68,8 @@ There are three kinds of memory on the GPU
    1. For reference, H100 SXM has 50 MB (lol, in comparison to HBM) of L2 cache with 12 TB/s of bandwidth.
 3. Shared memory - Fastest and smallest memory available on the GPU. Every SM has its shared memory and all the cores executing instructions in an SM have access to it.
 
+> Apart from the above, we also have warps in GPUs. Warps are a collection of 32 threads that are executed at once by the GPU. It's slightly more complex to understand how warps work, so I will leave it out of the scope of this blog.
+
 By now, you should be able to understand how GPU hardware is organized. There are a few other hardware concepts that I did not go through like warp scheduler, register files, etc. here, but that are not crucial to get started.
 
 ## Back to LLMs
@@ -79,7 +81,7 @@ Take an example of the H100 SXM GPU that can do 67 teraFlops (FP32) of computati
 1. Need to transfer ~90x the data (67 trillion/750 billion) from the memory to the computer layer per second
 2. Or perform, ~90 operations on every data point each second
 
-So, it's tough to keep up with the computing power of the GPU. The bottleneck comes in transferring the data. There are three good resources on this topic that you should definitely read:
+So, it's tough to keep up with the computing power of the GPU. The bottleneck comes in transferring the data. There are three good resources on this topic that you should read to understand this better:
 
 1. [NVIDIA docs](https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html#understand-perf)
 2. An article by Horace He [here](https://horace.io/brrr_intro.html).
