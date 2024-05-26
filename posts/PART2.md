@@ -14,7 +14,7 @@ Okay, with that out of the way, let's understand a few important concepts of GPU
 
 ### Threads
 
-Each kernel is executed by a thread in the GPU. And every thread executes the same kernel (assuming you have a single kernel in the program). This makes it necessary for us to write our kernel such that a single function can operate on all the data points. When we launch a kernel, what we are starting are GPU threads that will execute instructions written inside the kernel. We can start a lot of threads at once and these are the true powerhouse of the GPU.
+Each kernel is executed by a thread in the GPU. And every thread executes the same kernel (assuming we have a single kernel in the program). This makes it necessary for us to write our kernel such that a single function can operate on all the data points. When we launch a kernel, what we are starting are GPU threads that will execute instructions written inside the kernel. We can start a lot of threads at once to process a huge amount of data at once.
 
 All threads have some small memory associated with it which is called local memory. Apart from that, threads can also access the shared memory, L2 cache, and global memory.
 
@@ -22,38 +22,38 @@ Physically, threads are assigned to cores. Cores execute software threads.
 
 ### Blocks
 
-Threads are logically organized into blocks. Every block has a pre-defined number of threads assigned to it. *Just for logical purposes*, we can arrange threads inside a block in either a 1D, 2D, or 3D array layout. You can think of blocks as an array of threads. It's important to understand that this 1D, 2D, or 3D arrangement is purely logical and for the developer's convenience only. This arrangement is provided so it's easier to visualize our input and output data. If we imagine that we want to operate on a 100x100 matrix, then we can just launch a kernel with a block size of 100 by 100 threads. That will start a total of $10^4$ (100x100) threads which we can use to map to the matrix. We can write our kernel such that every single thread operates on every single element of the matrix.
+Threads are logically organized into blocks. Every block has a pre-defined number of threads assigned to it. *Just for logical purposes*, we can arrange threads inside a block in either a 1D, 2D, or 3D array layout. We can think of blocks as an array of threads. It's important to understand that this 1D, 2D, or 3D arrangement is purely logical and for the developer's convenience only. This arrangement is provided so it's easier to visualize our input and output data. If we imagine that we want to operate on a 100x100 matrix, then we can just launch a kernel with a block size of 100 by 100 threads. That will start a total of $10^4$ (100x100) threads which we can use to map to the matrix. We can write our kernel such that every single thread operates on every single element of the matrix.
 
 In the physical world, every block is assigned an SM. Throughout its execution, the block will only be executed on the same SM. Since every block is assigned an SM, it also has access to the SM's shared memory (which we learned in the first part). All the threads that are part of a single block can access and share this memory.
 
 ### Grids
 
-Similar to how threads are organized in blocks, blocks are themselves organized into a grid. That helps us to launch multiple blocks at one time. As we discussed earlier, a single GPU has multiple SMs, we can launch multiple blocks at once so that all of our SMs and cores are utilized. Let's assume that our program executes 25 blocks and our GPU has 10 SMs. Then the program will execute 10 blocks in the first wave, 10 blocks in the second wave, and 5 blocks in the third wave. The first two waves will have 100% optimization but the last wave will have 50% utilization.
+Similar to how threads are organized in blocks, blocks are themselves organized into a grid. That helps us to launch multiple blocks at one time. A single GPU has multiple SMs, we can launch multiple blocks at once so that all of our SMs and cores are utilized. Let's assume that our program executes 25 blocks and our GPU has 10 SMs. Then the program will execute 10 blocks in the first wave, 10 blocks in the second wave, and 5 blocks in the third wave. The first two waves will have 100% optimization but the last wave will have 50% utilization.
 
-Blocks inside a grid can be organized in the same way that threads are organized inside a block. A grid can have a 1D, 2D, or 3D array layout of the blocks. The arrangement of blocks and threads is just logical. A single program only executes a single grid at a time.
+Blocks inside a grid can be organized in the same way that threads are organized inside a block. A grid can have a 1D, 2D, or 3D array layout of the blocks. The arrangement of blocks and threads is just logical. A single program only executes a single grid at a time. The grid has access to the global memory or HBM of the GPU.
 
 ![threads-blocks](image-2.png)
 
 Figure 1: Grids/Blocks/Threads layout
 Source: Borrowed from [this](https://siboehm.com/articles/22/CUDA-MMM) excellent blog.
 
-During execution, we start a total of `blocks per thread (b) * number of blocks (num)` physical threads. Each physical thread is numbered from `0` to `(b*num)-1`. So, how do you map your 2D or 3D structure of logical thread blocks to the physical thread? By unrolling.
+During execution, we start a total of `blocks per thread (b) * number of blocks (num)` physical threads. Each physical thread is numbered from `0` to `(b*num)-1`. So, how do we map our 2D or 3D structure of logical thread blocks to the physical thread? By unrolling.
 
-A 2D array layout can be to 1D. If it's row-major ordering, then a 2D matrix after unrolling will look like this:
+A 2D array layout can be unrolled to 1D. If it's row-major ordering, then a 2D matrix after unrolling will look like this:
 
 ![matrix unrolling](image-1.png)
 
-Figure 2: Element `A[2][3]` in the 2D matrix will be `A[5]` in the flattened 1D array. This is how you can think of mapping 2D blocks of thread to the 1D thread array.
+Figure 2: Element `A[2][3]` in the 2D matrix will be `A[5]` in the flattened 1D array. This is how we can think of mapping 2D blocks of thread to the 1D thread array.
 
 When we arrange the blocks and threads in this 1D, 2D, or 3D layout, CUDA maps them to the x-axis, y-axis, and z-axis in its programming model. This will be useful in the next section.
 
 ## A simple example in CUDA
 
-Now that you have hopefully understood what threads, blocks, and grids are, let's start with CUDA. CUDA is a programming extension of C/C++ that helps us write heterogeneous programs (that run on CPU and GPU). These programs allow us to define and launch kernels from the CPU. CUDA is very powerful and offers a lot of ways to optimize our kernels. It's just a bit ... too verbose.
+Now that we have hopefully understood what threads, blocks, and grids are, let's start with CUDA. CUDA is a programming extension of C/C++ that helps us write heterogeneous programs (that run on CPU and GPU). These programs allow us to define and launch kernels from the CPU. CUDA is very powerful and offers a lot of ways to optimize our kernels. It's just a bit ... too verbose.
 
 Let's slowly walk through an example to understand how CUDA works. Let's implement a very naive implementation of matrix multiplication. We will be using some CUDA function calls, they should be self-explanatory, but in case they are not, just google the syntax. This is a relatively simple kernel, so should be easy to follow along. Here are the general steps of writing and launching a kernel from CUDA:
 
-1. Allocate the memory for the data (both input and output) on the CPU memory (also called as host). We will allocate memory for our input (X), weight matrix (W), and output (O). Assuming B as the batch size, N as the number of rows or sequence length in transformers, D_in as the number of columns or embedding dimension, and D_out as the hidden dimension.
+1. Allocate the memory for the data (both input and output) on the CPU memory (also called as host). We will allocate memory for our input (`X`), weight matrix (`W`), and output (`O`). Assuming `B` as the batch size, `N` as the number of rows or sequence length in transformers, `D_in` as the number of columns or embedding dimension, and D_out as the hidden dimension.
 
 ```C
 float *X = (float*)malloc(B*N*D_in*sizeof(float));      // Input data
@@ -71,7 +71,7 @@ cudaMalloc((void**) &d_W, D_in*D_out*sizeof(float));
 cudaMalloc((void**) &d_O, B*N*D_out*sizeof(float));
 ```
 
-3. Copy the relevant data from the CPU memory to the GPU memory. Let's assume that we have loaded `X` and `W` with relevant data. Now we transfer the data to the GPU. Just for convenience, I have prefixed the variable that will reside on GPU memory with `d_`. These variables are a copy of `X` and `W` but allocated in the GPU memory.
+3. Copy the relevant data from the CPU memory to the GPU memory. Let's assume that we have loaded `X` and `W` with relevant data. Now we transfer that data to the GPU. Just for convenience, I have prefixed the variable that will reside on GPU memory with `d_`. These variables are a copy of `X` and `W` but allocated in the GPU memory.
 
 ```C
 cudaMemcpy(d_X, X, B*N*D_in*sizeof(float), cudaMemcpyHostToDevice);     // cudaMemcpy is again a CUDA function
@@ -79,7 +79,7 @@ cudaMemcpy(d_W, W, D_in*D_out*sizeof(float), cudaMemcpyHostToDevice);
 
 ```
 
-4. Launch the kernel. Assuming that our kernel is called `matMul`, `grid` defines how the blocks are arranged and `blocks` define how threads are arranged in each block. For this example, the `grids` will be a 1D array equal to the batch size. `blocks` will have the same layout as the output dimension of our output matrix (`N*D_out`). This means that every block will process a single output matrix from the batch and every thread will process a single cell of our output matrix.
+4. Launch the kernel. Assuming that our kernel is called `matMul`, `grid` defines how the blocks are arranged and `blocks` define how threads are arranged in each block. For this example, the `grid` will be a 1D array equal to the batch size. `blocks` will have the same layout as the output dimension of our output matrix (`N*D_out`). This means that every block will process a single output matrix from the batch and every thread will process a single cell of our output matrix.
 
 ```C
 // We would launch B blocks, each block processing a single batch
@@ -149,9 +149,9 @@ Remember that physically there is no 2D or 3D arrangement of threads. That const
 To figure out which data a particular thread should process, the kernel just needs to figure out which thread is it executing. Depending on the batch, row, and column, each thread will load different parts of the input and weight matrix. These are called offsets and we have calculated three offsets in our code:
 
 1. `batch`: Figure out which matrix in the batch this kernel is processing.`blockIdx.x` gives the block ID in the x-axis of our grid layout. Since we have a 1D grid, this is the only direction available to us.
-2. `row`: Figure out within a matrix, which row is the kernel processing. Rows are mapped to the y-axis.
-3. `col`: Figure out within a matrix, which column is the kernel processing. Columns are mapped to the x-axis.
-4. `out_offset`: Finally, we map the thread ID to the exact cell in the output matrix. You can think of this as:
+2. `row`: Figure out within a matrix, which row is the kernel processing. Rows are mapped to the y-axis of the block layout.
+3. `col`: Figure out within a matrix, which column is the kernel processing. Columns are mapped to the x-axis of the block layout.
+4. `out_offset`: Finally, we map the thread ID to the exact cell in the output matrix. We can think of this as:
    1. Skipping `batch` matrices to arrive at our current matrix. To skip one single matrix, we would have to go ahead `N*D_out` number of elements in the flattened 1D array
    2. Skipping `row` number of rows. In a 1D flattened layout, we would skip a row by moving ahead `D_out` elements.
    3. Finally, adding `col` to the summation of the above two to arrive at our element.
@@ -168,9 +168,9 @@ The complete code is present [here](https://github.com/cmeraki/vit.triton/blob/m
 
 ## A simple example in Triton
 
-CUDA is amazing and lets us do a lot of optimizations. But it is quite verbose. Plus, if you are coming from the machine learning/data science domain, you are probably more familiar with Python. Open AI released a package called [Triton](https://triton-lang.org/) that provides a Python environment to write kernels and compile them for any GPU. By using Triton, you can write very performant kernels in Python directly.
+CUDA is amazing and lets us do a lot of optimizations. But it is quite verbose. Plus, if you are coming from the machine learning/data science domain, you are probably more familiar with Python. Open AI released a package called [Triton](https://triton-lang.org/) that provides a Python environment to write kernels and compile them for any GPU. By using Triton, we can write very performant kernels in Python directly.
 
-But instead of working with individual threads, Triton works with blocks. Instead of each kernel being assigned a thread, in Triton each kernel is assigned a block. Triton abstracts out the thread computation completely so that you can focus on slightly higher-order computation.
+But instead of working with individual threads, Triton works with blocks. Instead of each kernel being assigned a thread, in Triton each kernel is assigned a block. Triton abstracts out the thread computation completely so that we can focus on slightly higher-order computation.
 
 In our example of matrix multiplication, instead of computing a single element of the output in our kernel, Triton can help us compute values for small "blocks" of the output matrix.
 
@@ -181,9 +181,9 @@ Source: [Triton documentation](https://triton-lang.org/main/programming-guide/ch
 
 Let's reimplement the matrix multiplication example using Triton. The steps for Triton are very simple.
 
-1. Implement a "wrapper" function to call the kernel. Below, we are calling the Triton kernel with `matmul_kernel`. We define the grid and the block sizes similar to how we do with CUDA. There are some assert statements to make sure that we don't run into any errors. When we pass the torch tensors to the kernel, triton implicitly converts it into a pointer. We just need to make sure that whatever tensors we are passing to the kernel are already on the GPU (by `x.to('cuda:0')`).
+1. Implement a "wrapper" function to call the kernel. Below, we are calling the Triton kernel with `matmul_kernel`. We define the grid and the block sizes similar to how we do with CUDA. There are some assert statements to make sure that we don't run into any errors. When we pass the torch tensors to the kernel, Triton implicitly converts it into a pointer. We just need to make sure that whatever tensors we are passing to the kernel are already on the GPU (by `x.to('cuda:0')`).
    1. Unlike CUDA however, we start a grid layout where we have 3 axes. In the first axis, we have batch size, and in the other two axes, we have the number of times it will take `BLOCK_SIZE_ROW` to cover all the rows (similarly for `BLOCK_SIZE_COL`).
-   2. During execution, this means, that for kernel will process - `BLOCK_SIZE_ROW x BLOCK_SIZE_COL` sub-matrix in the input for every, one input in the batch.
+   2. During execution, this means, that for kernel will process - `BLOCK_SIZE_ROW x BLOCK_SIZE_COL` sub-matrix in the input for every input in the batch.
 
 ```python
 def matmul(input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
@@ -329,11 +329,11 @@ tl.program_id(axis=1) == 2
 tl.program_id(axis=2) == 1
 ```
 
-In this `(1, 2, 1)`th block, how should we prepare our offsets? In the 1D representation of the matrix, we want to load the elements highlighted in green.
-
 ![tritonblocks](tritonblocks.png)
 
 Figure 5: `(1 x 16 x 12)` matrix is divided into blocks of size `(4 x 4)`. `1, 2, 1`th block is highlighted. The value at every place is the index of that position in the 1D flattened array.
+
+In this `(1, 2, 1)`th block, how should we prepare our offsets? In the 1D representation of the matrix, we want to load the elements highlighted in green.
 
 ```python
 # Offsets for output data
@@ -356,13 +356,15 @@ output_row_offset = row_idx*BLOCK_SIZE_ROW + tl.arange(0, BLOCK_SIZE_ROW)
 # output_row_offset = 2*4 + (0, 1, 2, 3) = (8, 9, 10, 11)
 ```
 
-If we add it directly to our `output_ptr` we will get the 8th, 9th, 10th, and 11th element from the 1D flattened matrix. We don't want that. We want the highlighted elements. So we do a transformation:
+If we add it directly to our `output_ptr` we will get the 8th, 9th, 10th, and 11th element from the 1D flattened array. We don't want that. We want the highlighted elements. So we do a transformation:
 
 ```python
 output_row_offset = output_row_offset[:, None] * output_row_stride
 # This multiplies each element by the output_row_stride which is equal to 12 (number of columns), the number of elements we would skip in 1D array to reach the start of next row
-# ouput_row_offset becomes (96, 108, 120, 132). But it also gets transformed into a row vector
+# ouput_row_offset becomes (96, 108, 120, 132). It also gets transformed into a row vector
 ```
+
+We do a similar transformation for the columns:
 
 ```python
 output_col_offset = col_idx*BLOCK_SIZE_COL + tl.arange(0, BLOCK_SIZE_COL)
@@ -370,13 +372,11 @@ output_col_offset = col_idx*BLOCK_SIZE_COL + tl.arange(0, BLOCK_SIZE_COL)
 # output_col_offset = 1*4 + (0, 1, 2, 3) = (4, 5, 6, 7)
 ```
 
-We do a similar transformation here:
-
 ```python
 output_col_offset = output_col_offset[None, :] * output_col_stride
 # This multiplies each element by the output_col_stride which is equal to 1, the number of elements we would skip in 1D array to advance by one column.
 # Since this is a row major ordering, columns are adjacent to each other.
-# ouput_col_offset becomes (4, 5, 6, 7). But it also gets transformed into a column vector
+# ouput_col_offset becomes (4, 5, 6, 7). It also gets transformed into a column vector
 ```
 
 Finally,
@@ -391,7 +391,7 @@ Here, we first add `output_row_offset` and `output_col_offset`. Since one of the
 
 Figure 6: How 2D blocks are created from 2 1D offsets
 
-This gives us the appropriate data. You can similarly load the relevant data for other tensors. The rest of the code is more about syntax rather than any core logic. So I'll leave that for you to explore. But if you understand the offset calculation properly, you should be able to write your kernels independently.
+This gives us the appropriate data. We can similarly load the relevant data for other tensors. The rest of the code is more about syntax rather than any core logic. So I'll leave that for you to explore. But if you understand the offset calculation properly, you should be able to write your kernels independently.
 
 The complete code is present [here](https://github.com/cmeraki/vit.triton/blob/main/examples/matmul_batch.py). You just need Triton and Torch for this example.
 
@@ -399,7 +399,7 @@ The complete code is present [here](https://github.com/cmeraki/vit.triton/blob/m
 
 Congrats on making this far away. Now that you understand the basics of GPU hardware and its programming model, you can go ahead and implement any network from scratch, this time not relying on PyTroch for operations but writing your kernels in CUDA or Triton.
 
-What would you require for that? If you want to implement a transformer encoder network, you would need to implement all the basic layers and operations in Triton or Kernel.
+In case, you want to implement a transformer encoder network, you would need to implement all the basic layers and operations in Triton or CUDA.
 
 1. Matrix multiplication
 2. Layernorm
@@ -407,4 +407,4 @@ What would you require for that? If you want to implement a transformer encoder 
 4. Addition
 5. Concatenation
 
-You can then wrap these kernels in the PyTorch module and load weights from HF to compare your implementation with other PyTorch/TF native implementations. If this sounds interesting, this is exactly what we did too. We implemented most of the operations used in Vision Transformer (including patching and addition operations) in Triton and used HF weights to run a forward pass. You can look at the code [here](https://github.com/cmeraki/vit.triton) and maybe implement your favorite model too using custom kernels!
+You can then wrap these kernels in the PyTorch module and load weights from HF to compare your implementation with other PyTorch/TF native implementations. If this sounds interesting, this is exactly what we did too. We implemented most of the operations used in Vision Transformer (ViT) including patching and addition operations in Triton and loaded weights from a checkpoint to run a forward pass. You can look at the code [here](https://github.com/cmeraki/vit.triton) and maybe implement your favorite model too using custom kernels!
