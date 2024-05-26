@@ -5,7 +5,7 @@ from torch import nn
 from typing import Optional
 from loguru import logger
 
-from .utils import transfer_pretrained_weights#,benchmark
+from .load_weights import transfer_pretrained_weights
 from .kernels import (
     matmul,
     softmax,
@@ -55,7 +55,7 @@ class SelfAttention(nn.Module):
         qkv_proj = self.qkv(x)
         # Split back into Q, K, V
         q = qkv_proj[:, :, :self.d_out].contiguous()
-        k = qkv_proj[:, :, self.dout:2*self.d_out]
+        k = qkv_proj[:, :, self.d_out:2*self.d_out]
         v = qkv_proj[:, :, 2*self.d_out:3*self.d_out].contiguous()
 
         # Inputs are B x N x d_out, B x d_out x N
@@ -87,25 +87,15 @@ class MultiHeadAttention(nn.Module):
         self.d_in = d_in
         self.d_out = d_out
 
-        self.attention = nn.ModuleList([SelfAttention(d_in=d_in, d_out=d_out) for _ in range(self.num_heads)])
+        self.attention = SelfAttention(d_in, d_in)
         self.output = LinearWithBias(self.d_in, self.d_in)
 
     #@tensor_info('mha')
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # B x N x d_in
-        attn_output = torch.empty_like(x)
+        attn_output = self.attention(x)
 
-        for i, attn in enumerate(self.attention):
-            # Naive: Process one head at a time
-            # Each elem in output will be B x N x d_out
-            # TODO: P2 Implement MHA in a more optimized kernel
-            op = attn(x)
-            attn_output[:, :, i*self.d_out:(i+1)*self.d_out] = op
-
-        attn_output = attn_output.contiguous()
-        out = self.output(attn_output)
-
-        return out
+        return self.output(attn_output)
 
 
 class Transformer(nn.Module):

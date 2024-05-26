@@ -1,14 +1,14 @@
 import sys
 import torch
 from transformers import ViTModel
-from typing import OrderedDict, Dict
+from typing import Dict
 from loguru import logger
 
 logger.remove()
 logger.add(sys.stdout, format="[{time: YYYY-MM-DD HH:mm:ss} {level}] {message}", level="INFO")
 
 
-def map_attn_layers(source_layer_num: str, source_proj: str, source_type: str, source_tensor: torch.Tensor, dest_state_dict: dict) -> Dict:
+def map_attn_layers(source_layer_num: int, source_model: ViTModel, dest_state_dict: dict) -> Dict:
     """
     Maps query, key and value weight matrices from pretrained model to custom model.
     This is required to handle seperately because in HF, the weight matrices are [d_model, d_head*n_head].
@@ -16,23 +16,19 @@ def map_attn_layers(source_layer_num: str, source_proj: str, source_type: str, s
     Whereas in our custom model, the weights are separated in different matrices.
     """
 
-    for layer, weight in dest_state_dict.items():
-        if len(layer.split('.')) <= 2:
-            continue
+    logger.debug(f"Transferring attention layer weights from {source_layer_num}")
+    q = source_model.encoder.layer[source_layer_num].attention.attention.query
+    k = source_model.encoder.layer[source_layer_num].attention.attention.key
+    v = source_model.encoder.layer[source_layer_num].attention.attention.value
 
-        layer_num, proj, type = layer.split('.')[2], layer.split('.')[-2], layer.split('.')[-1]
-        if (layer_num == source_layer_num) and (proj == source_proj) and (type == source_type):
-            num_head = int(layer.split('.')[5])
+    dest_qkv_weight = torch.cat([q.weight.T, k.weight.T, v.weight.T], dim=-1)
+    dest_qkv_weight = dest_qkv_weight.contiguous()
 
-            if type == 'weight':
-                src = source_tensor.T.contiguous()
-                src = src[:, num_head*64:(num_head+1)*64]
-            else:
-                src = source_tensor[num_head*64:(num_head+1)*64]
+    dest_qkv_bias = torch.cat([q.bias, k.bias, v.bias], dim=-1)
+    dest_qkv_bias = dest_qkv_bias.contiguous()
 
-            logger.debug(f'Mapping to destination\tLayer: {layer}\tSource tensor shape: {src.shape}\tDestination tensor shape: {weight.shape}')
-
-            dest_state_dict[layer] = src.clone()
+    dest_state_dict[f'encoder.layer.{source_layer_num}.attention.attention.qkv.weight'] = dest_qkv_weight.clone()
+    dest_state_dict[f'encoder.layer.{source_layer_num}.attention.attention.qkv.bias'] = dest_qkv_bias.clone()
 
     return dest_state_dict
 
@@ -62,3 +58,64 @@ def map_non_attn_layers(source_state_dict: dict, dest_state_dict: dict, weight_m
     return dest_state_dict
 
 
+def transfer_pretrained_weights(pretrained_model: torch.nn.Module, custom_model: torch.nn.Module) -> torch.nn.Module:
+    """
+    Transfer weights from a pretrained model to the custom model
+    """
+
+    pretrained_state_dict = pretrained_model.state_dict()
+    custom_state_dict = custom_model.state_dict()
+
+    num_layers = 12
+
+    # Mapping dictionary from source model to destination model
+    weight_mapping = {
+        'embeddings.cls_token': 'embeddings.cls_token',
+        'embeddings.position_embeddings': 'embeddings.position_embeddings',
+        'embeddings.patch_embeddings.projection.weight': 'embeddings.projection.weight',
+        'embeddings.patch_embeddings.projection.bias': 'embeddings.projection.bias',
+        'layernorm.weight': 'layernorm.weight',
+        'layernorm.bias': 'layernorm.bias',
+        'pooler.dense.weight': 'pooler.dense.weight',
+        'pooler.dense.bias': 'pooler.dense.bias'
+    }
+
+    # Adding mappings for each encoder layer's output and intermediate dense layers
+    for i in range(num_layers):
+        weight_mapping.update({
+            f'encoder.layer.{i}.output.dense.weight': f'encoder.layer.{i}.output.weight',
+            f'encoder.layer.{i}.output.dense.bias': f'encoder.layer.{i}.output.bias',
+            f'encoder.layer.{i}.intermediate.dense.weight': f'encoder.layer.{i}.intermediate.weight',
+            f'encoder.layer.{i}.intermediate.dense.bias': f'encoder.layer.{i}.intermediate.bias',
+            f'encoder.layer.{i}.attention.output.dense.weight': f'encoder.layer.{i}.attention.output.weight',
+            f'encoder.layer.{i}.attention.output.dense.bias': f'encoder.layer.{i}.attention.output.bias',
+            f'encoder.layer.{i}.layernorm_before.weight': f'encoder.layer.{i}.layernorm_before.weight',
+            f'encoder.layer.{i}.layernorm_before.bias': f'encoder.layer.{i}.layernorm_before.bias',
+            f'encoder.layer.{i}.layernorm_after.weight': f'encoder.layer.{i}.layernorm_after.weight',
+            f'encoder.layer.{i}.layernorm_after.bias': f'encoder.layer.{i}.layernorm_after.bias'
+        })
+
+    for k in range(12):
+        custom_state_dict = map_attn_layers(k, pretrained_model, custom_state_dict)
+
+    # Transfer rest of the layers
+    custom_state_dict = map_non_attn_layers(
+        source_state_dict=pretrained_state_dict,
+        dest_state_dict=custom_state_dict,
+        weight_mapping=weight_mapping
+    )
+
+    custom_model.load_state_dict(custom_state_dict, strict=False)
+
+    custom_state_dict = custom_model.state_dict()
+    uninitialized_layers = []
+
+    for k, v in custom_state_dict.items():
+        if torch.all(v == 0):
+            uninitialized_layers.append(k)
+
+    if uninitialized_layers:
+        # Pooler bias has all zeros, so that is expected to be here
+        print(f"Some layer are not initialized: {uninitialized_layers}")
+
+    return custom_model
