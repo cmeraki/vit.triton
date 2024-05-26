@@ -1,6 +1,7 @@
 import sys
 import math
 import torch
+import pandas as pd
 from torch import nn
 from typing import Optional
 from loguru import logger
@@ -266,6 +267,7 @@ if __name__ == '__main__':
         custom_model=model
     )
 
+    # Torch's way of benchmarking
     from .utils import benchmark
     batch_sizes = [1, 8, 32, 64, 128, 256]
     results = []
@@ -278,6 +280,7 @@ if __name__ == '__main__':
 
     results_df.to_csv('./benchmarks/model/benchmark.csv', index=False)
 
+    # Triton's way of benchmarking
     """
     import triton
     @triton.testing.perf_report(
