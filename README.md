@@ -54,21 +54,27 @@ TBA
 The results of benchmarks comparing custom Triton implementation with PyTorch operations are as follows (higher the better):
 
 **add**
+
 ![add Performance Chart](./benchmarks/add/Performance.png)
 
 **layernorm**
+
 ![layernorm Performance Chart](./benchmarks/layernorm/Performance.png)
 
 **matmul**
+
 ![matmul Performance Chart](./benchmarks/matmul/Performance.png)
 
 **matmul3**
+
 ![matmul3 Performance Chart](./benchmarks/matmul3/Performance.png)
 
 **softmax**
+
 ![softmax Performance Chart](./benchmarks/softmax/Performance.png)
 
 **conv2d**
+
 ![conv2d Performance Chart](./benchmarks/conv2d/Performance.png)
 
 ### ViT.Triton vs HuggingFace
