@@ -39,7 +39,6 @@ python -m vit.vit                                       # This will run the benc
     - utils.py              # Utils
     - vit.py                # Architecture written in torch, but calling triton kernels
 - benchmarks/               # Benchmark results
-- posts/                    # Blog posts related to GPU programming 
 - examples/                 # Small examples used in posts
 ```
 
