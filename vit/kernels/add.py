@@ -175,7 +175,7 @@ if __name__ == '__main__':
 
 
     benchmark.run(
-        show_plots=True,
+        #show_plots=True, # weirdly show_plots and save_paths don't work together
         print_data=True,
         save_path='./benchmarks/add/'
     )

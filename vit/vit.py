@@ -279,6 +279,7 @@ if __name__ == '__main__':
         custom_model=model
     )
 
+    """
     from .utils import benchmark
     batch_sizes = [1, 8, 32, 64, 128, 256]
     results = []
@@ -296,13 +297,13 @@ if __name__ == '__main__':
     @triton.testing.perf_report(
         triton.testing.Benchmark(
             x_names=['batch_size'],
-            x_vals=[1, 8, 16, 32, 64],
+            x_vals=[1, 2, 4, 8, 16, 24, 32, 48, 64],
             line_arg='provider',
             line_vals=['triton', 'hf'],
             line_names=['Triton', 'Huggingface'],
             styles=[('blue', '-'), ('green', '-')],
             ylabel='Time (ms)',
-            plot_name='Benchmark with Hugging Face',
+            plot_name='benchmark_vit',
             args={'model1': model, 'model2': pretrained_model}
         )
     )
@@ -320,8 +321,7 @@ if __name__ == '__main__':
         return ms, min_ms, max_ms
 
     benchmark.run(
-        show_plots=True,
+        # show_plots=True,
         print_data=True,
         save_path='./benchmarks/model/'
     )
-    """
