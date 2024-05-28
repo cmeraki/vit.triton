@@ -209,7 +209,7 @@ if __name__ == '__main__':
         return gbps(ms), gbps(max_ms), gbps(min_ms)
 
     benchmark.run(
-        show_plots=True,
+        #show_plots=True,
         print_data=True,
         save_path='./benchmarks/layernorm/'
     )
