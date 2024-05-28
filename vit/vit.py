@@ -30,7 +30,6 @@ class LinearWithBias(nn.Module):
         self.bias = nn.Parameter(torch.zeros(output_dim))
         self.activation = activation
 
-    ##@tensor_info('linear')
     def forward(self, x) -> torch.Tensor:
         return matmul(x, self.weight, self.bias, self.activation)
 
@@ -40,34 +39,47 @@ class SelfAttention(nn.Module):
         self,
         d_in: int,
         d_out: int,
+        num_heads: int,
         dropout: int = 0, #TODO: P1 Add dropout support, currently ViT does not have dropout, so not adding it
     ):
         super().__init__()
         self.d_in = d_in
         self.d_out = d_out
+        self.num_heads = num_heads
+        self.d_head = self.d_in//self.num_heads
 
-        # Merging all 3 projections into one
-        self.qkv = LinearWithBias(self.d_in, 3*d_out)
+        # Merging all 3 projections into one, (d_in, 3*d_out)
+        self.qkv = LinearWithBias(self.d_in, 3*self.d_out)
 
-    #@tensor_info('self-attn')
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # The trick is borrowed for here: https://lightning.ai/docs/pytorch/stable/notebooks/course_UvA-DL/05-transformers-and-MH-attention.html
+        # (B, N, d_in)
+        batch_size, seq_len, input_dim = x.size()
 
-        # All three are B x N x 3d_out
+        # (B, N, 3*dout)
         qkv_proj = self.qkv(x)
-        # Split back into Q, K, V
-        q = qkv_proj[:, :, :self.d_out].contiguous()
-        k = qkv_proj[:, :, self.d_out:2*self.d_out]
-        v = qkv_proj[:, :, 2*self.d_out:3*self.d_out].contiguous()
 
-        # Inputs are B x N x d_out, B x d_out x N
-        # Output is B x N x N
+        # Split back into Q, K, V
+        qkv_proj = qkv_proj.reshape(batch_size, seq_len, self.num_heads, 3 * self.d_head) # (B, N, H, 3*d_head)
+        qkv_proj = qkv_proj.permute(0, 2, 1, 3)  # (B, H, N, 3*d_head)
+        q, k, v = qkv_proj.chunk(3, dim=-1)  # (B, H, N, d_head)
+
+        # Reshaping to (B*H, N, d_head)
+        q = q.reshape(batch_size*self.num_heads, seq_len, self.d_head).contiguous()
+        k = k.reshape(batch_size*self.num_heads, seq_len, self.d_head).contiguous()
+        v = v.reshape(batch_size*self.num_heads, seq_len, self.d_head).contiguous()
+
+        # Inputs are (B*H, N, d_head), (B*H, d_head, N)
+        # Output is (B*H, N, N)
         k = k.transpose(1, 2).contiguous()
-        attn_scores = matmul3(q, k, apply_scaling=True, scale_factor=1/math.sqrt(self.d_out))
+        attn_scores = matmul3(q, k, apply_scaling=True, scale_factor=1/math.sqrt(self.d_head))
         attn_scores = softmax(attn_scores)
 
-        # Inputs are B x N x N, B x N x d_out
-        # Output is B x N x d_out
+        # Inputs are (B*H, N, N), (B*H, N, d_head), Output is (B*H, N, d_head)
         context_vec = matmul3(attn_scores, v)
+        context_vec = context_vec.reshape(batch_size, self.num_heads, seq_len, self.d_head) # (B, H, N, d_head)
+        context_vec = context_vec.permute(0, 2, 1, 3)  # (B, N, H, d_head)
+        context_vec = context_vec.reshape(batch_size, seq_len, self.d_out)  # (B, N, d_out)
 
         return context_vec
 
@@ -88,10 +100,9 @@ class MultiHeadAttention(nn.Module):
         self.d_in = d_in
         self.d_out = d_out
 
-        self.attention = SelfAttention(d_in, d_in)
+        self.attention = SelfAttention(self.d_in, self.d_in, self.num_heads)
         self.output = LinearWithBias(self.d_in, self.d_in)
 
-    #@tensor_info('mha')
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # B x N x d_in
         attn_output = self.attention(x)
@@ -117,7 +128,6 @@ class Transformer(nn.Module):
         self.output = LinearWithBias(4*self.d_in, self.d_in)
         self.layernorm_after = LayerNormTriton(self.d_in, eps=1e-12)
 
-    #@tensor_info('transformer')
     def forward(self, x):
         # B x N x D_out
         attn = self.attention(
@@ -150,7 +160,6 @@ class Encoder(nn.Module):
             Transformer(num_heads=self.num_heads, d_in=self.hidden_dim, d_out=d_out) for _ in range(self.num_layers)
         )
 
-    #@tensor_info('encoder')
     def forward(self, x) -> torch.Tensor:
         for layer in self.layer:
             x = layer(x)
@@ -172,7 +181,6 @@ class Embeddings(nn.Module):
             kernel_size=(self.patch_size, self.patch_size)
         )
 
-    #@tensor_info('embedding')
     def forward(self, x) -> torch.Tensor:
         # Input processing
         x = self.projection(x)
@@ -296,7 +304,7 @@ if __name__ == '__main__':
             args={'model1': model, 'model2': pretrained_model}
         )
     )
-    def benchmark(batch_size, model1, model2, provider):
+    def benchmark_triton(batch_size, model1, model2, provider):
         quantiles = [0.5, 0.2, 0.8]
         inp = torch.randn((batch_size, 3, 224, 224), device='cuda', dtype=torch.float32)
 
@@ -309,7 +317,7 @@ if __name__ == '__main__':
         
         return ms, min_ms, max_ms
 
-    benchmark.run(
+    benchmark_triton.run(
         # show_plots=True,
         print_data=True,
         save_path='./benchmarks/model/'
