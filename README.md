@@ -11,11 +11,25 @@ Some accompanying posts can help you get started with GPU programming:
 
 ## Goals
 
+[Current]
+
 This repo has 3 goals:
 
 1. Learn GPU programming by learning how to write Triton kernels
 2. Learn to use triton kernels in a model by implementing an architecture using PyTorch but by calling custom triton kernels
 3. Learn to load model weights to a custom implementation from a different repository like HuggingFace
+
+[Future]
+
+This repo aims to become a standalone pip installable package for using ViT in the most optimized way. To reach there, we would need the following optimizations
+
+1. Faster Conv1D implementation - This should help beat HF implementation at all batch sizes
+2. Add Flash attn - This should significantly improve the time
+3. Given a batch size, fix all the tensor sizes
+4. Use CUDA graphs to optimize kernel dispatch time
+5. Support for other ViT flavors
+
+This should help it become a really fast and optimized ViT implementation that can be used as an image encoder in all the multimodal models during inference or training of LLM. Training/Fine-tuning of ViT is currently out of the scope for this repo.
 
 ## Setup
 
